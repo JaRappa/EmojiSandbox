@@ -11,6 +11,9 @@ const CONFIG = {
   MAX_ENTITIES: 800,
   EAT_DISTANCE: 28,
   EDGE_BOUNCE_MARGIN: 20,
+
+  // Boundary bounce — how close animals can get to the canvas edge before bouncing
+  BOUNDARY_MARGIN: 40,         // bounce back before touching the wall
   REPRODUCTION_COOLDOWN: 900,  // ticks before same pair can spawn again
 
   // Hunger
