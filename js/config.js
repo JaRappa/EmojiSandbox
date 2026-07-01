@@ -11,9 +11,6 @@ const CONFIG = {
   MAX_ENTITIES: 800,
   EAT_DISTANCE: 28,
   EDGE_BOUNCE_MARGIN: 20,
-
-  // Boundary bounce — how close animals can get to the canvas edge before bouncing
-  BOUNDARY_MARGIN: 40,         // bounce back before touching the wall
   REPRODUCTION_COOLDOWN: 900,  // ticks before same pair can spawn again
 
   // Hunger
@@ -22,6 +19,7 @@ const CONFIG = {
   HUNGER_SEEK_THRESHOLD: 60,   // hunger at which animals start seeking food — below this they're "full" and wander
   HUNGER_EAT_ZERO: 0,          // hunger value after eating
   HUNGER_FULL_COOLDOWN: 120,   // ticks after eating before animal can eat again (prevents instant re-eating)
+  HUNGER_SENSE_RADIUS_MULTIPLIER: 2.5,  // max multiplier on senseRadius when starving (e.g. 2.5 means 3.5x base at max hunger)
 
   // Steering
   WANDER_STRENGTH: 0.3,

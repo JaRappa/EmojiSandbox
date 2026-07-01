@@ -1,7 +1,7 @@
 // entity.js — Entity factory and per-tick update logic.
 import CONFIG from './config.js';
 import { SPECIES, EATS, FLEES } from './rules.js';
-import { wander, seek, arrive, flee, sweepScan } from './behaviors.js';
+import { wander, seek, arrive, flee, edgeBounce, sweepScan } from './behaviors.js';
 
 let _nextId = 1;
 
@@ -61,6 +61,10 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
     return;
   }
 
+  // Dynamic sense radius: hungrier animals see farther
+  const hungerRatio = entity.hunger / CONFIG.HUNGER_MAX;
+  const dynamicSenseRadius = species.senseRadius * (1 + hungerRatio * CONFIG.HUNGER_SENSE_RADIUS_MULTIPLIER);
+
   const speed = species.speed * CONFIG.MAX_SPEED_MULTIPLIER;
   let ax = 0, ay = 0;
   entity.state = 'wander';
@@ -68,7 +72,7 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
   // Priority 1: Flee
   const fears = FLEES[entity.category];
   if (fears) {
-    const threats = grid.query(entity.x, entity.y, species.senseRadius);
+    const threats = grid.query(entity.x, entity.y, dynamicSenseRadius);
     for (const { entity: other } of threats) {
       if (other === entity || other.dead) continue;
       if (fears.includes(other.category)) {
@@ -89,7 +93,7 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
   if (entity.state !== 'flee' && shouldSeek) {
     const edible = EATS[entity.category];
     if (edible) {
-      const nearby = grid.query(entity.x, entity.y, species.senseRadius);
+      const nearby = grid.query(entity.x, entity.y, dynamicSenseRadius);
       // Sort by distance
       nearby.sort((a, b) => a.distSq - b.distSq);
       for (const { entity: other, dist } of nearby) {
@@ -155,6 +159,11 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
     }
   }
 
+  // Edge bounce
+  const [bx, by] = edgeBounce(entity, canvasWidth, canvasHeight);
+  ax += bx;
+  ay += by;
+
   // Apply acceleration
   entity.vx += ax;
   entity.vy += ay;
@@ -166,42 +175,13 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
     entity.vy = (entity.vy / vLen) * speed;
   }
 
-  // Move with bounce-redirect at boundaries
-  const margin = CONFIG.BOUNDARY_MARGIN;
-  let newX = entity.x + entity.vx;
-  let newY = entity.y + entity.vy;
+  // Move
+  entity.x += entity.vx;
+  entity.y += entity.vy;
 
-  // If about to cross a boundary: bounce velocity inward, randomize wander,
-  // and clamp position at the margin (never at the very edge)
-  let bounced = false;
-  if (newX < margin) {
-    entity.vx = Math.abs(entity.vx);
-    newX = margin;
-    bounced = true;
-  }
-  if (newX > canvasWidth - margin) {
-    entity.vx = -Math.abs(entity.vx);
-    newX = canvasWidth - margin;
-    bounced = true;
-  }
-  if (newY < margin) {
-    entity.vy = Math.abs(entity.vy);
-    newY = margin;
-    bounced = true;
-  }
-  if (newY > canvasHeight - margin) {
-    entity.vy = -Math.abs(entity.vy);
-    newY = canvasHeight - margin;
-    bounced = true;
-  }
-
-  // On bounce: randomize wander direction so animal picks a new path
-  if (bounced) {
-    entity._wanderAngle = Math.random() * Math.PI * 2;
-  }
-
-  entity.x = newX;
-  entity.y = newY;
+  // No spawning outside canvas
+  entity.x = Math.max(0, Math.min(canvasWidth, entity.x));
+  entity.y = Math.max(0, Math.min(canvasHeight, entity.y));
 }
 
 /** Plant: spawn fruit on interval */
