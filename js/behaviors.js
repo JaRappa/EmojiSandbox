@@ -4,7 +4,8 @@ import CONFIG from './config.js';
 /** Add a small random steering force; return [ax, ay]. */
 export function wander(entity, species) {
   if (!entity._wanderAngle) entity._wanderAngle = Math.random() * Math.PI * 2;
-  entity._wanderAngle += (Math.random() - 0.5) * CONFIG.WANDER_DIRECTION_CHANGE;
+  const changeRate = entity._wanderChangeRate || CONFIG.WANDER_DIRECTION_CHANGE;
+  entity._wanderAngle += (Math.random() - 0.5) * changeRate;
   // Wrap angle
   entity._wanderAngle = ((entity._wanderAngle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
   return [
@@ -13,13 +14,14 @@ export function wander(entity, species) {
   ];
 }
 
-/** Steer toward target at seek strength. */
+/** Steer toward target at seek strength (uses per-entity variance if available). */
 export function seek(entity, target) {
   const dx = target.x - entity.x;
   const dy = target.y - entity.y;
   const len = Math.sqrt(dx * dx + dy * dy);
   if (len < 0.01) return [0, 0];
-  return [(dx / len) * CONFIG.SEEK_STRENGTH, (dy / len) * CONFIG.SEEK_STRENGTH];
+  const str = entity._seekStrength || CONFIG.SEEK_STRENGTH;
+  return [(dx / len) * str, (dy / len) * str];
 }
 
 /** Steer toward target with arrival deceleration — slows near target so we can eat it. */
@@ -29,7 +31,8 @@ export function arrive(entity, target) {
   const dist = Math.sqrt(dx * dx + dy * dy);
   if (dist < 0.01) return [0, 0];
 
-  const desiredSpeed = Math.min(CONFIG.SEEK_STRENGTH * 60, dist * 0.06);
+  const seekStr = entity._seekStrength || CONFIG.SEEK_STRENGTH;
+  const desiredSpeed = Math.min(seekStr * 60, dist * 0.06);
   const desired = [(dx / dist) * desiredSpeed, (dy / dist) * desiredSpeed];
   const steer = [
     desired[0] - entity.vx,
@@ -37,7 +40,7 @@ export function arrive(entity, target) {
   ];
   // Clamp steering force
   const steerLen = Math.sqrt(steer[0] * steer[0] + steer[1] * steer[1]);
-  const maxForce = CONFIG.SEEK_STRENGTH;
+  const maxForce = seekStr;
   if (steerLen > maxForce) {
     steer[0] = (steer[0] / steerLen) * maxForce;
     steer[1] = (steer[1] / steerLen) * maxForce;
@@ -50,19 +53,25 @@ export function flee(entity, threat) {
   const dx = entity.x - threat.x;
   const dy = entity.y - threat.y;
   const len = Math.sqrt(dx * dx + dy * dy);
-  if (len < 0.01) return [(Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4];
+  const fleeStr = entity._fleeStrength || CONFIG.FLEE_STRENGTH;
+  if (len < 0.01) return [(Math.random() - 0.5) * fleeStr, (Math.random() - 0.5) * fleeStr];
 
-  // Primary flee: directly away
-  const fx = (dx / len) * CONFIG.FLEE_STRENGTH;
-  const fy = (dy / len) * CONFIG.FLEE_STRENGTH;
+  // Add a random scatter to the flee direction so not everyone runs the same way
+  const scatterAngle = (Math.random() - 0.5) * 0.6; // ±~17° jitter
+  const cosS = Math.cos(scatterAngle), sinS = Math.sin(scatterAngle);
+  const baseX = dx / len, baseY = dy / len;
+  const dirX = baseX * cosS - baseY * sinS;
+  const dirY = baseX * sinS + baseY * cosS;
+
+  const fx = dirX * fleeStr;
+  const fy = dirY * fleeStr;
 
   // Perpendicular jitter for evasion — makes prey harder to catch
-  const perpX = -dy / len;
-  const perpY = dx / len;
-  const jitterStrength = CONFIG.FLEE_STRENGTH * 0.4;
-  // Use a per-entity side preference that occasionally switches
+  const perpX = -dirY;
+  const perpY = dirX;
+  const jitterStrength = fleeStr * 0.4;
   if (!entity._fleeSide) entity._fleeSide = Math.random() < 0.5 ? -1 : 1;
-  entity._fleeSide *= (Math.random() < 0.03 ? -1 : 1); // occasionally switch
+  entity._fleeSide *= (Math.random() < 0.03 ? -1 : 1);
 
   return [
     fx + perpX * jitterStrength * entity._fleeSide,
@@ -77,8 +86,9 @@ export function flee(entity, threat) {
  *   interest: 0-1 how strongly interested in the swept direction
  */
 export function sweepScan(entity, grid, species, edible, fears) {
-  // Rotate the sweep angle
-  entity._sweepAngle = ((entity._sweepAngle + CONFIG.SWEEP_SPEED) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+  // Rotate the sweep angle — use per-entity speed if set
+  const sweepSpeed = entity._sweepSpeed || CONFIG.SWEEP_SPEED;
+  entity._sweepAngle = ((entity._sweepAngle + sweepSpeed) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
 
   // Query a wide area — use the spatial grid with the sweep range
   const nearby = grid.query(entity.x, entity.y, CONFIG.SWEEP_RANGE);
@@ -130,7 +140,8 @@ export function sweepScan(entity, grid, species, edible, fears) {
     entity._sweepTargetType = bestCategory;
 
     // Gentle pull toward the detected target (much weaker than seek)
-    const pullStrength = CONFIG.SEEK_STRENGTH * 0.25 * entity._sweepInterest;
+    const seekStr = entity._seekStrength || CONFIG.SEEK_STRENGTH;
+    const pullStrength = seekStr * 0.25 * entity._sweepInterest;
     const dx = bestTarget.x - entity.x;
     const dy = bestTarget.y - entity.y;
     const len = Math.sqrt(dx * dx + dy * dy);
@@ -149,14 +160,106 @@ export function sweepScan(entity, grid, species, edible, fears) {
   return { steering: null, interest: entity._sweepInterest, foundTarget: false };
 }
 
-/** Soft-bounce off canvas edges. */
+/**
+ * Predictive wall avoidance — looks ahead and redirects velocity BEFORE hitting a wall.
+ * Only activates when the entity is actually heading toward an edge.
+ * No repulsion when moving parallel to or away from walls.
+ */
 export function edgeBounce(entity, canvasWidth, canvasHeight) {
-  const m = CONFIG.EDGE_BOUNCE_MARGIN;
+  const margin = CONFIG.EDGE_BOUNCE_MARGIN;
+  const lookAhead = 20;                         // ticks to project ahead
+  const turnStrength = CONFIG.EDGE_BOUNCE_STRENGTH || 3.0;
+
   let ax = 0, ay = 0;
-  const strength = 0.5;
-  if (entity.x < m) ax += strength * (1 - entity.x / m);
-  if (entity.x > canvasWidth - m) ax -= strength * (1 - (canvasWidth - entity.x) / m);
-  if (entity.y < m) ay += strength * (1 - entity.y / m);
-  if (entity.y > canvasHeight - m) ay -= strength * (1 - (canvasHeight - entity.y) / m);
+
+  // Predict where we'll be if we keep moving in current direction
+  const futureX = entity.x + entity.vx * lookAhead;
+  const futureY = entity.y + entity.vy * lookAhead;
+
+  // Only redirect if heading TOWARD the wall (checks velocity sign)
+  if (entity.vx < 0 && futureX < margin) {
+    // heading left into wall — steer right
+    const urgency = 1 - Math.max(0, futureX) / margin;
+    ax += turnStrength * urgency * urgency;
+  }
+  if (entity.vx > 0 && futureX > canvasWidth - margin) {
+    // heading right into wall — steer left
+    const urgency = 1 - Math.max(0, canvasWidth - futureX) / margin;
+    ax -= turnStrength * urgency * urgency;
+  }
+  if (entity.vy < 0 && futureY < margin) {
+    // heading up into wall — steer down
+    const urgency = 1 - Math.max(0, futureY) / margin;
+    ay += turnStrength * urgency * urgency;
+  }
+  if (entity.vy > 0 && futureY > canvasHeight - margin) {
+    // heading down into wall — steer up
+    const urgency = 1 - Math.max(0, canvasHeight - futureY) / margin;
+    ay -= turnStrength * urgency * urgency;
+  }
+
+  return [ax, ay];
+}
+
+/**
+ * Flocking: separation, alignment, cohesion for group-moving species.
+ * Returns [ax, ay] force to add.
+ */
+export function flocking(entity, grid, species) {
+  const nearby = grid.query(entity.x, entity.y, CONFIG.FLOCK_RADIUS);
+  const neighbors = [];
+
+  for (const { entity: other } of nearby) {
+    if (other === entity || other.dead) continue;
+    if (other.type === entity.type) {
+      neighbors.push(other);
+    }
+  }
+
+  if (neighbors.length === 0) return [0, 0];
+
+  let sepX = 0, sepY = 0;
+  let avgVx = 0, avgVy = 0;
+  let centerX = 0, centerY = 0;
+  let sepCount = 0;
+
+  for (const n of neighbors) {
+    const dx = entity.x - n.x;
+    const dy = entity.y - n.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < CONFIG.FLOCK_SEPARATION && dist > 0.01) {
+      sepX += (dx / dist) / dist;
+      sepY += (dy / dist) / dist;
+      sepCount++;
+    }
+    avgVx += n.vx;
+    avgVy += n.vy;
+    centerX += n.x;
+    centerY += n.y;
+  }
+
+  let ax = 0, ay = 0;
+  const n = neighbors.length;
+
+  // Separation
+  if (sepCount > 0) {
+    ax += (sepX / sepCount) * CONFIG.FLOCK_SEPARATION_FORCE;
+    ay += (sepY / sepCount) * CONFIG.FLOCK_SEPARATION_FORCE;
+  }
+
+  // Alignment
+  avgVx /= n;
+  avgVy /= n;
+  ax += (avgVx - entity.vx) * CONFIG.FLOCK_ALIGNMENT;
+  ay += (avgVy - entity.vy) * CONFIG.FLOCK_ALIGNMENT;
+
+  // Cohesion
+  centerX /= n;
+  centerY /= n;
+  const cohDx = centerX - entity.x;
+  const cohDy = centerY - entity.y;
+  ax += cohDx * CONFIG.FLOCK_COHESION;
+  ay += cohDy * CONFIG.FLOCK_COHESION;
+
   return [ax, ay];
 }

@@ -100,6 +100,15 @@ function updateWorld() {
       addParticle(e._ateAt.x, e._ateAt.y, '💨');
       e._ateAt = null;
     }
+
+    // Explosion particles
+    if (e._explodedAt) {
+      for (let i = 0; i < 15; i++) {
+        addParticle(e._explodedAt.x, e._explodedAt.y, '💥');
+      }
+      e._explodedAt = null;
+      e.dead = true;
+    }
   }
 
   // Remove dead entities

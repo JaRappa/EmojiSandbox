@@ -10,7 +10,8 @@ const CONFIG = {
   MAX_SPEED_MULTIPLIER: 1.0,   // applied to species base speed
   MAX_ENTITIES: 800,
   EAT_DISTANCE: 28,
-  EDGE_BOUNCE_MARGIN: 20,
+  EDGE_BOUNCE_MARGIN: 60,
+  EDGE_BOUNCE_STRENGTH: 4.0,    // wall-redirect strength — predictive, only active when heading toward edge
   REPRODUCTION_COOLDOWN: 900,  // ticks before same pair can spawn again
 
   // Hunger
@@ -52,6 +53,41 @@ const CONFIG = {
   WATER_LIFESPAN: 400,
   PLANT_SPAWN_RADIUS: 40,
   PLANT_MAX_FRUIT_NEARBY: 3,
+
+  // Lightning
+  LIGHTNING_INTERVAL: 600,     // ticks between lightning strikes (average)
+  LIGHTNING_RADIUS: 50,        // kill radius of lightning strike
+  LIGHTNING_STUN_RADIUS: 120,  // stun radius (slows entities)
+
+  // Ice
+  ICE_FREEZE_RADIUS: 70,       // radius in which ice slows entities
+  ICE_SLOW_FACTOR: 0.2,        // speed multiplier when frozen
+  ICE_LIFESPAN: 500,           // ticks before ice melts
+
+  // Poison
+  POISON_DAMAGE: 0.3,          // damage per tick from poison
+  POISON_SPREAD_RADIUS: 50,    // radius poison cloud affects
+
+  // Flocking
+  FLOCK_RADIUS: 80,            // neighborhood radius for flocking
+  FLOCK_SEPARATION: 30,        // desired separation distance
+  FLOCK_ALIGNMENT: 0.08,       // alignment force weight
+  FLOCK_COHESION: 0.04,        // cohesion force weight
+  FLOCK_SEPARATION_FORCE: 0.6, // separation force weight
+
+  // Special abilities
+  DRAGON_FIRE_INTERVAL: 400,   // ticks between dragon fire breaths
+  UNICORN_HEAL_RADIUS: 100,    // heal aura radius
+  UNICORN_HEAL_AMOUNT: -15,    // hunger reduction from heal (negative = reduces hunger)
+  SPIDER_WEB_RADIUS: 50,       // web trap radius
+  SPIDER_WEB_DURATION: 200,    // how long webs last
+  ZOMBIE_INFECT_RADIUS: 40,    // infection spread radius
+  OCTOPUS_INK_RADIUS: 60,      // ink cloud radius
+  OCTOPUS_INK_DURATION: 80,    // how long ink blinds
+
+  // Reproduction
+  REPRODUCTION_RADIUS: 60,     // how close two of same species need to be
+  REPRODUCTION_CHANCE: 0.002,  // chance per tick when near mate
 
   // UI
   PLACE_THROTTLE_MS: 100,     // min ms between place events during drag
