@@ -96,7 +96,7 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
     if (species.category === 'water') updateWater(entity, grid, entities);
     if (species.category === 'lightning') updateLightning(entity, grid, entities);
     if (species.category === 'ice') updateIce(entity, grid, entities);
-    if (species.category === 'tornado') updateTornado(entity, grid, entities);
+    if (species.category === 'tornado') updateTornado(entity, grid, entities, canvasWidth, canvasHeight);
     if (species.category === 'bomb') updateBomb(entity, grid, entities);
     if (entity.lifespan > 0) {
       entity.lifespan--;
@@ -499,8 +499,43 @@ function updateIce(entity, grid, entities) {
   }
 }
 
-/** Tornado: sucks entities in and flings them */
-function updateTornado(entity, grid, entities) {
+/** Tornado: wanders around, sucks entities in and flings them */
+function updateTornado(entity, grid, entities, canvasWidth, canvasHeight) {
+  // ── Wandering movement ──
+  if (entity._wanderAngle === undefined) entity._wanderAngle = Math.random() * Math.PI * 2;
+  entity._wanderAngle += (Math.random() - 0.5) * CONFIG.TORNADO_WANDER_CHANGE;
+  entity._wanderAngle = ((entity._wanderAngle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+
+  const speed = CONFIG.TORNADO_SPEED;
+  entity.vx = Math.cos(entity._wanderAngle) * speed;
+  entity.vy = Math.sin(entity._wanderAngle) * speed;
+
+  // Apply movement
+  entity.x += entity.vx;
+  entity.y += entity.vy;
+
+  // Bounce off edges
+  const margin = CONFIG.EDGE_BOUNCE_MARGIN;
+  if (entity.x < margin) {
+    entity.x = margin;
+    entity._wanderAngle = Math.PI - entity._wanderAngle;
+  }
+  if (entity.x > canvasWidth - margin) {
+    entity.x = canvasWidth - margin;
+    entity._wanderAngle = Math.PI - entity._wanderAngle;
+  }
+  if (entity.y < margin) {
+    entity.y = margin;
+    entity._wanderAngle = -entity._wanderAngle;
+  }
+  if (entity.y > canvasHeight - margin) {
+    entity.y = canvasHeight - margin;
+    entity._wanderAngle = -entity._wanderAngle;
+  }
+  // Re-wrap angle after bounces
+  entity._wanderAngle = ((entity._wanderAngle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+
+  // ── Suction ──
   const nearby = grid.query(entity.x, entity.y, CONFIG.ICE_FREEZE_RADIUS * 1.7);
   for (let j = 0; j < nearby.length; j++) {
     const { entity: other, dist } = nearby[j];

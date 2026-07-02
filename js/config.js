@@ -90,6 +90,10 @@ const CONFIG = {
   REPRODUCTION_RADIUS: 60,     // how close two of same species need to be
   REPRODUCTION_CHANCE: 0.002,  // chance per tick when near mate
 
+  // Tornado
+  TORNADO_SPEED: 0.8,          // base movement speed
+  TORNADO_WANDER_CHANGE: 0.04, // radians per tick direction change
+
   // UI
   PLACE_THROTTLE_MS: 100,     // min ms between place events during drag
   MIN_TRAY_BUTTON_SIZE: 56,
