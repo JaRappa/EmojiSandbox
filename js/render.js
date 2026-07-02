@@ -1,5 +1,6 @@
 // render.js — Canvas rendering: entities, particles, grid overlay.
 import CONFIG from './config.js';
+import { getCanvasBgColor } from './theme.js';
 
 let particleArr = [];
 
@@ -69,7 +70,7 @@ export function render(ctx, canvas, entities, paused) {
   const h = canvas._cssHeight || canvas.height;
 
   // Background
-  ctx.fillStyle = CONFIG.BG_COLOR;
+  ctx.fillStyle = getCanvasBgColor();
   ctx.fillRect(0, 0, w, h);
 
   // ── Cache ──

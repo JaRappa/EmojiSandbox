@@ -6,6 +6,7 @@ import { createEntity, updateEntity } from './entity.js';
 import { render, addParticle, clearParticles, getParticles } from './render.js';
 import { autosave, loadAutosave, saveSlot, loadSlot, deleteSlot, listSlots } from './storage.js';
 import { getUIState, initUI, updateEntityCounter } from './ui.js';
+import { initTheme, getTheme, toggleTheme, getCanvasBgColor } from './theme.js';
 
 // ── State ────────────────────────────────
 let entities = [];
@@ -32,6 +33,17 @@ function boot() {
       tick = 0;
     },
   });
+
+  // Theme
+  initTheme();
+  const btnTheme = document.getElementById('btn-theme');
+  if (btnTheme) {
+    btnTheme.textContent = getTheme() === 'dark' ? '🌙' : '☀️';
+    btnTheme.addEventListener('click', () => {
+      const newTheme = toggleTheme();
+      btnTheme.textContent = newTheme === 'dark' ? '🌙' : '☀️';
+    });
+  }
 
   // Try to restore autosave
   const saved = loadAutosave();

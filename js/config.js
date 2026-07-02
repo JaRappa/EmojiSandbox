@@ -3,7 +3,9 @@
 const CONFIG = {
   // Canvas
   BG_COLOR: '#1a1a2e',
+  BG_COLOR_LIGHT: '#f0f2f5',
   GRID_COLOR: 'rgba(255,255,255,0.02)',
+  GRID_COLOR_LIGHT: 'rgba(0,0,0,0.03)',
 
   // Simulation
   TICKS_PER_SECOND: 60,
