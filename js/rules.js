@@ -79,6 +79,7 @@ const SPECIES = {
   // ── Elements ───────────────────────────
   fire:      { emoji: '🔥', category: 'fire',       static: true, spreadsTo: 'plant', radius: 60, lifespanTicks: 300 },
   water:     { emoji: '💧', category: 'water',      static: true, extinguishes: 'fire', radius: 80, lifespanTicks: 400 },
+  wave:      { emoji: '🌊', category: 'water',      static: true, extinguishes: 'fire', radius: 60, lifespanTicks: 300 },
   lightning: { emoji: '⚡', category: 'lightning',   static: true, strikes: true, radius: 50, stunRadius: 120, lifespanTicks: 150 },
   ice:       { emoji: '🧊', category: 'ice',        static: true, freezes: true, radius: 70, lifespanTicks: 500 },
   tornado:   { emoji: '🌪️', category: 'tornado',    static: true, sucks: true, radius: 120, lifespanTicks: 350 },
@@ -128,7 +129,7 @@ const TRAY_ORDER = [
   // Plants
   'plant', 'flower', 'cactus', 'tree', 'mushroom_p',
   // Elements
-  'fire', 'water', 'lightning', 'ice', 'tornado', 'bomb',
+  'fire', 'water', 'wave', 'lightning', 'ice', 'tornado', 'bomb',
 ];
 
 // Tool "species" — not real entities

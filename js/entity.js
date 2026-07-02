@@ -65,6 +65,16 @@ export function createEntity(type, x, y) {
     _dragonFireTimer: species.breathesFire ? Math.random() * CONFIG.DRAGON_FIRE_INTERVAL : 0,
     _inkTimer: 0,
     _fightTarget: null,
+    _wildfirePhase: species.category === 'fire' ? 0 : -1,   // 0=center, 1-3=rings, -1=not wildfire
+    _wildfireTimer: species.category === 'fire' ? CONFIG.WILDFIRE_PHASE_DURATION : 0,
+    _wildfireCascade: species.category === 'fire',           // only cascading fire spawns next ring
+    _wildfireOriginX: species.category === 'fire' ? x : 0,   // ring center for cascading
+    _wildfireOriginY: species.category === 'fire' ? y : 0,
+    _waterWavePhase: type === 'wave' ? 0 : -1,               // 0=center, 1-3=rings, -1=not wave
+    _waterWaveTimer: type === 'wave' ? CONFIG.WATER_WAVE_PHASE_DURATION : 0,
+    _waterWaveCascade: type === 'wave',                      // only cascading wave spawns next ring
+    _waterWaveOriginX: type === 'wave' ? x : 0,
+    _waterWaveOriginY: type === 'wave' ? y : 0,
   };
 }
 
@@ -93,7 +103,8 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
     // Static entities
     if (species.category === 'plant') updatePlant(entity, grid, entities);
     if (species.category === 'fire') updateFire(entity, grid, entities);
-    if (species.category === 'water') updateWater(entity, grid, entities);
+    if (species.category === 'water' && entity.type === 'wave') updateWaterWave(entity, grid, entities);
+    else if (species.category === 'water') updateWater(entity, grid, entities);
     if (species.category === 'lightning') updateLightning(entity, grid, entities);
     if (species.category === 'ice') updateIce(entity, grid, entities);
     if (species.category === 'tornado') updateTornado(entity, grid, entities, canvasWidth, canvasHeight);
@@ -400,17 +411,51 @@ function updatePlant(entity, grid, entities) {
   }
 }
 
-/** Fire: spread, deal damage, burn plants */
+/** Fire: spread, deal damage, burn plants. Wildfire: phase-based ring spread. */
 function updateFire(entity, grid, entities) {
-  // If this is a mobile fireball (dragon fire), move it
+  // If this is a mobile fireball (dragon fire), move it — no wildfire behavior
   if (entity.static === false) {
     entity.x += entity.vx || 0;
     entity.y += entity.vy || 0;
     entity.vx *= 0.995; // slow drag
     entity.vy *= 0.995;
+    // Still burn things it passes through
+    const nearby = grid.queryRaw(entity.x, entity.y, CONFIG.FIRE_SPREAD_RADIUS);
+    for (let j = 0; j < nearby.length; j++) {
+      const other = nearby[j].entity;
+      if (other === entity || other.dead) continue;
+      if (other.category === 'plant') { other.dead = true; addParticle(other.x, other.y, '🔥'); }
+      if (other.category === 'ice')  { other.dead = true; addParticle(other.x, other.y, '💨'); }
+      if (other.hp !== undefined && other.category !== 'fire') {
+        other.hp -= 0.05;
+        if (other.hp <= 0) other.dead = true;
+      }
+    }
+    return;
   }
 
-  const species = SPECIES[entity.type];
+  // ── Wildfire: phase-based ring spread ──
+  // Only the center fire (phase 0, _wildfireCascade=true) cascades.
+  // Ring fires just burn their duration and die.
+
+  entity._wildfireTimer--;
+  if (entity._wildfireTimer <= 0) {
+    // Cascade to next ring — only center fire does this
+    if (entity._wildfireCascade && entity._wildfirePhase < 3) {
+      const nextPhase = entity._wildfirePhase + 1;
+      const countIdx = entity._wildfirePhase; // phase 0→count[0]=6, phase 1→count[1]=16, phase 2→count[2]=36
+      const radius = CONFIG.WILDFIRE_RING_RADII[entity._wildfirePhase];
+      const count = CONFIG.WILDFIRE_RING_COUNTS[countIdx];
+      const angleOffset = entity._wildfirePhase * (Math.PI / count);
+      const ox = entity._wildfireOriginX;
+      const oy = entity._wildfireOriginY;
+      spawnFireRing(ox, oy, radius, count, nextPhase, angleOffset, entities);
+    }
+    entity.dead = true;
+    return;
+  }
+
+  // Burn & damage nearby while alive
   const nearby = grid.queryRaw(entity.x, entity.y, CONFIG.FIRE_SPREAD_RADIUS);
   for (let j = 0; j < nearby.length; j++) {
     const other = nearby[j].entity;
@@ -423,10 +468,75 @@ function updateFire(entity, grid, entities) {
       other.dead = true;
       addParticle(other.x, other.y, '💨');
     }
-    // Burn animals
     if (other.hp !== undefined && other.category !== 'fire') {
       other.hp -= 0.05;
       if (other.hp <= 0) other.dead = true;
+    }
+  }
+}
+
+/** Spawn a ring of fire entities around a center point */
+function spawnFireRing(cx, cy, radius, count, phase, angleOffset, entities) {
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2 + angleOffset;
+    const fx = cx + Math.cos(angle) * radius;
+    const fy = cy + Math.sin(angle) * radius;
+    const fire = createEntity('fire', fx, fy);
+    if (fire) {
+      fire.lifespan = -1; // don't use old lifespan system — we manage timing
+      fire._wildfirePhase = phase;
+      fire._wildfireTimer = CONFIG.WILDFIRE_PHASE_DURATION;
+      fire._wildfireCascade = (i === 0); // only first fire in ring cascades to next
+      fire._wildfireOriginX = cx;
+      fire._wildfireOriginY = cy;
+      entities.push(fire);
+    }
+  }
+}
+
+/** Water Wave: phase-based ring spread, same pattern as wildfire. */
+function updateWaterWave(entity, grid, entities) {
+  // Phase countdown
+  entity._waterWaveTimer--;
+  if (entity._waterWaveTimer <= 0) {
+    if (entity._waterWavePhase < 3 && entity._waterWaveCascade) {
+      const nextPhase = entity._waterWavePhase + 1;
+      const radius = CONFIG.WATER_WAVE_RING_RADII[entity._waterWavePhase];
+      const count = CONFIG.WATER_WAVE_RING_COUNTS[entity._waterWavePhase];
+      const angleOffset = entity._waterWavePhase * (Math.PI / count);
+      spawnWaterWaveRing(entity._waterWaveOriginX, entity._waterWaveOriginY, radius, count, nextPhase, angleOffset, entities);
+    }
+    entity.dead = true;
+    return;
+  }
+
+  // Extinguish nearby fire
+  const nearby = grid.queryRaw(entity.x, entity.y, CONFIG.WATER_RADIUS);
+  for (let j = 0; j < nearby.length; j++) {
+    const other = nearby[j].entity;
+    if (other === entity || other.dead) continue;
+    if (other.category === 'fire') {
+      other.dead = true;
+      addParticle(other.x, other.y, '💨');
+    }
+  }
+}
+
+/** Spawn a ring of wave entities around a center point */
+function spawnWaterWaveRing(cx, cy, radius, count, phase, angleOffset, entities) {
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2 + angleOffset;
+    const wx = cx + Math.cos(angle) * radius;
+    const wy = cy + Math.sin(angle) * radius;
+    const wave = createEntity('wave', wx, wy);
+    if (wave) {
+      wave.lifespan = -1;
+      wave._waterWavePhase = phase;
+      wave._waterWaveTimer = CONFIG.WATER_WAVE_PHASE_DURATION;
+      wave._waterWaveCascade = (i === 0);
+      wave._waterWaveOriginX = cx;
+      wave._waterWaveOriginY = cy;
+      entities.push(wave);
     }
   }
 }

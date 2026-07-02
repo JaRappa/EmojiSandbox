@@ -50,6 +50,12 @@ const CONFIG = {
   // Fire / Water / Plants
   FIRE_SPREAD_RADIUS: 60,
   FIRE_LIFESPAN: 300,          // ticks
+  WILDFIRE_PHASE_DURATION: 60,        // ticks per ring (1 second at 60fps)
+  WILDFIRE_RING_RADII: [18, 28, 40],      // pixels — ring radii for phases 1–3
+  WILDFIRE_RING_COUNTS: [6, 16, 36],       // fires per ring (phase 1, 2, 3)
+  WATER_WAVE_PHASE_DURATION: 60,           // ticks per ring (1 second at 60fps)
+  WATER_WAVE_RING_RADII: [18, 28, 40],     // pixels — ring radii for phases 1–3
+  WATER_WAVE_RING_COUNTS: [6, 16, 36],     // waves per ring (phase 1, 2, 3)
   WATER_RADIUS: 80,
   WATER_LIFESPAN: 400,
   PLANT_SPAWN_RADIUS: 40,
