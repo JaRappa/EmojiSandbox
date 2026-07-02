@@ -77,9 +77,86 @@ html, body {
   top: 44px;
   left: 0;
   width: 100%;
-  height: calc(100% - 124px);  /* 44px top-bar + 80px tray */
+  height: calc(100% - 160px);  /* 44px top-bar + 36px category + 80px tray */
   cursor: crosshair;
   display: block;
+}
+
+/* ── Category Bar ─────────────────────── */
+#category-bar {
+  position: fixed;
+  bottom: 80px;
+  left: 0;
+  right: 0;
+  height: 36px;
+  background: rgba(26, 26, 46, 0.95);
+  backdrop-filter: blur(6px);
+  border-top: 1px solid rgba(255,255,255,0.06);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+}
+
+#category-scroll {
+  display: flex;
+  gap: 4px;
+  padding: 0 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.12) transparent;
+  width: 100%;
+  align-items: center;
+  -webkit-overflow-scrolling: touch;
+}
+
+#category-scroll::-webkit-scrollbar {
+  height: 3px;
+}
+
+#category-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.12);
+  border-radius: 3px;
+}
+
+#category-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* fade hint that there's more to scroll */
+#category-scroll::after {
+  content: '';
+  flex-shrink: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.cat-btn {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.55);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.cat-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.85);
+}
+
+.cat-btn.active {
+  background: rgba(99, 122, 255, 0.2);
+  border-color: rgba(99, 122, 255, 0.5);
+  color: rgba(255,255,255,0.95);
+  box-shadow: 0 0 10px rgba(99, 122, 255, 0.15);
 }
 
 /* ── Tray ─────────────────────────────── */

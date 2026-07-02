@@ -2,9 +2,24 @@
 import CONFIG from './config.js';
 import { SPECIES, TRAY_ORDER, TOOLS } from './rules.js';
 
+// UI-level category groups (can combine multiple rules categories under one tab)
+const UI_CATEGORIES = [
+  { id: 'herbivore', label: '🦌 Herbivores', cats: ['herbivore'] },
+  { id: 'predator',  label: '🦊 Predators',  cats: ['predator'] },
+  { id: 'undead',    label: '🧟 Undead',     cats: ['undead'] },
+  { id: 'mythical',  label: '🐉 Mythical',   cats: ['mythical'] },
+  { id: 'bug',       label: '🐜 Bugs',       cats: ['bug'] },
+  { id: 'bird',      label: '🦅 Birds',      cats: ['bird'] },
+  { id: 'sea',       label: '🐟 Sea',        cats: ['sea'] },
+  { id: 'food',      label: '🍎 Food',       cats: ['food'] },
+  { id: 'plant',     label: '🌱 Plants',     cats: ['plant'] },
+  { id: 'elements',  label: '⚡ Elements',   cats: ['fire', 'water', 'lightning', 'ice', 'tornado', 'bomb'] },
+];
+
 let state = {
   selectedType: TRAY_ORDER[0],
   selectedTool: null,    // 'eraser' | 'clear' | null
+  activeCategory: 'all', // 'all' or a category key
   paused: false,
   speed: 1,
   muted: true,
@@ -16,10 +31,104 @@ export function getUIState() {
 }
 
 export function initUI(callbacks) {
-  // Build tray buttons
-  const trayScroll = document.getElementById('tray-scroll');
+  // ── Category bar ──────────────────────
+  const catScroll = document.getElementById('category-scroll');
 
-  for (const key of TRAY_ORDER) {
+  const allBtn = document.createElement('button');
+  allBtn.className = 'cat-btn active';
+  allBtn.textContent = 'All';
+  allBtn.dataset.cat = 'all';
+  allBtn.addEventListener('click', () => {
+    state.activeCategory = 'all';
+    updateCategoryButtons();
+    rebuildTray();
+    // keep current selection if visible, else pick first
+    if (!isTypeVisible(state.selectedType)) {
+      state.selectedType = getFirstVisible();
+      state.selectedTool = null;
+    }
+    updateSelection();
+  });
+  catScroll.appendChild(allBtn);
+
+  for (const cat of UI_CATEGORIES) {
+    const btn = document.createElement('button');
+    btn.className = 'cat-btn';
+    btn.textContent = cat.label;
+    btn.dataset.cat = cat.id;
+    btn.addEventListener('click', () => {
+      state.activeCategory = cat.id;
+      updateCategoryButtons();
+      rebuildTray();
+      if (!isTypeVisible(state.selectedType)) {
+        state.selectedType = getFirstVisible();
+        state.selectedTool = null;
+      }
+      updateSelection();
+    });
+    catScroll.appendChild(btn);
+  }
+
+  // ── Build initial tray ────────────────
+  const trayScroll = document.getElementById('tray-scroll');
+  buildTrayContent(trayScroll);
+
+  // ── Top bar ───────────────────────────
+  const btnPause = document.getElementById('btn-pause');
+  const btnSpeed = document.getElementById('btn-speed');
+  const btnMute = document.getElementById('btn-mute');
+  const entityCounter = document.getElementById('entity-counter');
+
+  btnPause.addEventListener('click', () => {
+    state.paused = !state.paused;
+    btnPause.textContent = state.paused ? '▶️' : '⏯️';
+  });
+
+  btnSpeed.addEventListener('click', () => {
+    state.speed = state.speed === 1 ? 2 : state.speed === 2 ? 4 : 1;
+    btnSpeed.textContent = state.speed + 'x';
+  });
+
+  btnMute.addEventListener('click', () => {
+    state.muted = !state.muted;
+    btnMute.textContent = state.muted ? '🔇' : '🔊';
+  });
+
+  state.uiElements = { btnPause, btnSpeed, btnMute, entityCounter, trayScroll };
+  state._callbacks = callbacks;
+}
+
+// ── Tray helpers ─────────────────────────
+
+function getVisibleTypes() {
+  if (state.activeCategory === 'all') return TRAY_ORDER;
+  const group = UI_CATEGORIES.find(c => c.id === state.activeCategory);
+  if (!group) return [];
+  return TRAY_ORDER.filter(k => group.cats.includes(SPECIES[k].category));
+}
+
+function isTypeVisible(type) {
+  if (state.activeCategory === 'all') return true;
+  const group = UI_CATEGORIES.find(c => c.id === state.activeCategory);
+  if (!group) return false;
+  return group.cats.includes(SPECIES[type].category);
+}
+
+function getFirstVisible() {
+  return getVisibleTypes()[0] || TRAY_ORDER[0];
+}
+
+function updateCategoryButtons() {
+  const catScroll = document.getElementById('category-scroll');
+  for (const btn of catScroll.querySelectorAll('.cat-btn')) {
+    btn.classList.toggle('active', btn.dataset.cat === state.activeCategory);
+  }
+}
+
+function buildTrayContent(trayScroll) {
+  trayScroll.innerHTML = '';
+
+  for (const key of getVisibleTypes()) {
     const sp = SPECIES[key];
     const btn = document.createElement('button');
     btn.className = 'tray-btn';
@@ -57,33 +166,16 @@ export function initUI(callbacks) {
     if (confirm('Clear all entities?')) {
       state.selectedTool = null;
       updateSelection();
-      if (callbacks.onClear) callbacks.onClear();
+      if (state._callbacks && state._callbacks.onClear) state._callbacks.onClear();
     }
   });
   trayScroll.appendChild(clearBtn);
+}
 
-  // Top bar
-  const btnPause = document.getElementById('btn-pause');
-  const btnSpeed = document.getElementById('btn-speed');
-  const btnMute = document.getElementById('btn-mute');
-  const entityCounter = document.getElementById('entity-counter');
-
-  btnPause.addEventListener('click', () => {
-    state.paused = !state.paused;
-    btnPause.textContent = state.paused ? '▶️' : '⏯️';
-  });
-
-  btnSpeed.addEventListener('click', () => {
-    state.speed = state.speed === 1 ? 2 : state.speed === 2 ? 4 : 1;
-    btnSpeed.textContent = state.speed + 'x';
-  });
-
-  btnMute.addEventListener('click', () => {
-    state.muted = !state.muted;
-    btnMute.textContent = state.muted ? '🔇' : '🔊';
-  });
-
-  state.uiElements = { btnPause, btnSpeed, btnMute, entityCounter, trayScroll };
+function rebuildTray() {
+  const trayScroll = state.uiElements.trayScroll;
+  if (!trayScroll) return;
+  buildTrayContent(trayScroll);
 }
 
 function updateSelection() {
