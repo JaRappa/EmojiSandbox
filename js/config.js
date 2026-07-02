@@ -12,8 +12,8 @@ const CONFIG = {
   MAX_SPEED_MULTIPLIER: 1.0,   // applied to species base speed
   MAX_ENTITIES: 800,
   EAT_DISTANCE: 28,
-  EDGE_BOUNCE_MARGIN: 60,
-  EDGE_BOUNCE_STRENGTH: 4.0,    // wall-redirect strength — predictive, only active when heading toward edge
+  EDGE_BOUNCE_MARGIN: 15,
+  EDGE_BOUNCE_STRENGTH: 0.5,    // soft wall-steering strength — gentle push away from edges
   REPRODUCTION_COOLDOWN: 900,  // ticks before same pair can spawn again
 
   // Hunger

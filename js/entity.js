@@ -299,13 +299,13 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
   }
 
   // ── Wall avoidance — hard redirect BEFORE moving ──
-  // If heading toward a wall, pick a direction away from it.
-  const wallMargin = CONFIG.EDGE_BOUNCE_MARGIN;
+  // Exclusion zone aligns with canvas edges (margin = 0).
+  const wallMargin = 0;
 
-  const nearLeft  = entity.x < wallMargin && entity.vx < 0;
-  const nearRight = entity.x > canvasWidth - wallMargin && entity.vx > 0;
-  const nearTop   = entity.y < wallMargin && entity.vy < 0;
-  const nearBottom = entity.y > canvasHeight - wallMargin && entity.vy > 0;
+  const nearLeft  = entity.x <= wallMargin && entity.vx < 0;
+  const nearRight = entity.x >= canvasWidth - wallMargin && entity.vx > 0;
+  const nearTop   = entity.y <= wallMargin && entity.vy < 0;
+  const nearBottom = entity.y >= canvasHeight - wallMargin && entity.vy > 0;
 
   if (nearLeft || nearRight || nearTop || nearBottom) {
     let targetAngle;
