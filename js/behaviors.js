@@ -90,15 +90,18 @@ export function sweepScan(entity, grid, species, edible, fears) {
   const sweepSpeed = entity._sweepSpeed || CONFIG.SWEEP_SPEED;
   entity._sweepAngle = ((entity._sweepAngle + sweepSpeed) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
 
-  // Query a wide area — use the spatial grid with the sweep range
-  const nearby = grid.query(entity.x, entity.y, CONFIG.SWEEP_RANGE);
+  // Query using queryRaw (no sqrt) — limit to effective sweep range
+  const sweepRange = Math.min(CONFIG.SWEEP_RANGE, species.senseRadius * 3);
+  const nearby = grid.queryRaw(entity.x, entity.y, sweepRange);
 
   let bestTarget = null;
   let bestCategory = null;
   let bestDistSq = Infinity;
-  let bestAngle = 0;
 
-  for (const { entity: other, dist, distSq } of nearby) {
+  const sweepRangeSq = sweepRange * sweepRange;
+
+  for (let i = 0; i < nearby.length; i++) {
+    const { entity: other, distSq } = nearby[i];
     if (other === entity || other.dead) continue;
 
     // Check if it's something we care about (food or threat)
@@ -119,14 +122,13 @@ export function sweepScan(entity, grid, species, edible, fears) {
       // Closer to the center of the cone = stronger signal
       const coneCloseness = 1 - Math.abs(angleDiff) / CONFIG.SWEEP_ARC;
       // Closer in distance = stronger signal (prioritize nearby things)
-      const distScore = 1 - Math.min(dist / CONFIG.SWEEP_RANGE, 1);
+      const distScore = 1 - Math.min(distSq / sweepRangeSq, 1);
       const score = coneCloseness * 0.3 + distScore * 0.7;
 
       if (score > 0 && distSq < bestDistSq) {
         bestTarget = other;
         bestCategory = other.category;
         bestDistSq = distSq;
-        bestAngle = angleToOther;
       }
     }
   }
@@ -203,12 +205,30 @@ export function edgeBounce(entity, canvasWidth, canvasHeight) {
 
 /**
  * Flocking: separation, alignment, cohesion for group-moving species.
+ * Uses pre-queried nearbyAll array (from entity's unified query).
+ * Returns [ax, ay] force to add.
+ */
+export function flockingFromNearby(entity, nearbyAll) {
+  const neighbors = [];
+  for (let i = 0; i < nearbyAll.length; i++) {
+    const other = nearbyAll[i].entity;
+    if (other === entity || other.dead) continue;
+    if (other.type === entity.type) {
+      neighbors.push(other);
+    }
+  }
+
+  return computeFlocking(entity, neighbors);
+}
+
+/**
+ * Flocking: separation, alignment, cohesion for group-moving species.
+ * Does its own grid query. Prefer flockingFromNearby where possible.
  * Returns [ax, ay] force to add.
  */
 export function flocking(entity, grid, species) {
   const nearby = grid.query(entity.x, entity.y, CONFIG.FLOCK_RADIUS);
   const neighbors = [];
-
   for (const { entity: other } of nearby) {
     if (other === entity || other.dead) continue;
     if (other.type === entity.type) {
@@ -216,6 +236,10 @@ export function flocking(entity, grid, species) {
     }
   }
 
+  return computeFlocking(entity, neighbors);
+}
+
+function computeFlocking(entity, neighbors) {
   if (neighbors.length === 0) return [0, 0];
 
   let sepX = 0, sepY = 0;

@@ -26,31 +26,42 @@ class SpatialGrid {
     this.cells.get(key).push(entity);
   }
 
-  /** Return all entities within `radius` of (x, y) grouped by distance band. */
-  query(x, y, radius) {
+  /** Return all entities within `radius` of (x, y) with distSq only (no sqrt). */
+  queryRaw(x, y, radius) {
     const result = [];
     const [centerCx, centerCy] = this._cellCoords(x, y);
     const cellsOut = Math.ceil(radius / this.cellSize);
+    const rSq = radius * radius;
 
     for (let dx = -cellsOut; dx <= cellsOut; dx++) {
       for (let dy = -cellsOut; dy <= cellsOut; dy++) {
         const key = this._key(centerCx + dx, centerCy + dy);
         const cell = this.cells.get(key);
         if (!cell) continue;
-        for (const e of cell) {
+        for (let i = 0; i < cell.length; i++) {
+          const e = cell[i];
           if (e.dead) continue;
-          // Fast square-check first, then circle
           const ex = e.x - x;
           const ey = e.y - y;
-          if (Math.abs(ex) > radius || Math.abs(ey) > radius) continue;
+          // Fast square-check first, then circle
+          if (ex > radius || ex < -radius || ey > radius || ey < -radius) continue;
           const distSq = ex * ex + ey * ey;
-          if (distSq <= radius * radius && distSq > 0.001) {
-            result.push({ entity: e, distSq, dist: Math.sqrt(distSq) });
+          if (distSq <= rSq && distSq > 0.001) {
+            result.push({ entity: e, distSq });
           }
         }
       }
     }
     return result;
+  }
+
+  /** Return all entities within `radius` of (x, y) with dist and distSq. */
+  query(x, y, radius) {
+    const raw = this.queryRaw(x, y, radius);
+    for (let i = 0; i < raw.length; i++) {
+      raw[i].dist = Math.sqrt(raw[i].distSq);
+    }
+    return raw;
   }
 
   /** Return all entities in exact cell (for eraser / contact). */

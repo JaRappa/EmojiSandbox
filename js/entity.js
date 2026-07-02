@@ -1,7 +1,7 @@
 // entity.js — Entity factory and per-tick update logic.
 import CONFIG from './config.js';
 import { SPECIES, EATS, FLEES } from './rules.js';
-import { wander, seek, arrive, flee, sweepScan, flocking } from './behaviors.js';
+import { wander, seek, arrive, flee, sweepScan, flockingFromNearby } from './behaviors.js';
 
 let _nextId = 1;
 
@@ -32,6 +32,7 @@ export function createEntity(type, x, y) {
     targetId: null,
     age: 0,
     hp: (species.hp || 3) + Math.floor((seed - 0.5) * 3),  // ±1 hp variation
+    _maxHp: species.hp || 3,  // cached for fast render HP bar
     dead: false,
     spawnTimer: 0,
     lifespan: species.lifespanTicks ? species.lifespanTicks + Math.floor((seed - 0.5) * 120) : -1,
@@ -146,11 +147,15 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
   let ax = 0, ay = 0;
   entity.state = 'wander';
 
+  // ── UNIFIED SHORT-RANGE QUERY ──
+  // Do ONE queryRaw for flee + seek + flock + reproduction (all within sense radius)
+  const nearbyAll = grid.queryRaw(entity.x, entity.y, dynamicSenseRadius);
+
   // Priority 1: Flee
   const fears = FLEES[entity.category];
   if (fears) {
-    const threats = grid.query(entity.x, entity.y, dynamicSenseRadius);
-    for (const { entity: other } of threats) {
+    for (let i = 0; i < nearbyAll.length; i++) {
+      const other = nearbyAll[i].entity;
       if (other === entity || other.dead) continue;
       if (fears.includes(other.category)) {
         const [fx, fy] = flee(entity, other);
@@ -167,15 +172,19 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
   const canEat = entity._fullCooldown <= 0;
   const shouldSeek = isHungry && canEat;
 
+  const eatDistSq = CONFIG.EAT_DISTANCE * CONFIG.EAT_DISTANCE;
+
   if (entity.state !== 'flee' && shouldSeek) {
     const edible = EATS[entity.category];
     if (edible) {
-      const nearby = grid.query(entity.x, entity.y, dynamicSenseRadius);
-      nearby.sort((a, b) => a.distSq - b.distSq);
-      for (const { entity: other, dist } of nearby) {
+      // Sort by distSq (no sqrt needed)
+      nearbyAll.sort((a, b) => a.distSq - b.distSq);
+      for (let i = 0; i < nearbyAll.length; i++) {
+        const other = nearbyAll[i].entity;
         if (other === entity || other.dead) continue;
         if (edible.includes(other.category)) {
-          if (dist < CONFIG.EAT_DISTANCE) {
+          const distSq = nearbyAll[i].distSq;
+          if (distSq < eatDistSq) {
             // Eat it!
             other.dead = true;
             entity.hunger = CONFIG.HUNGER_EAT_ZERO;
@@ -190,6 +199,7 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
               entity._poisonTimer = 200; // poison lasts 200 ticks
             }
           } else {
+            const dist = Math.sqrt(distSq);
             const steeringFn = (entity.category === 'predator' || entity.category === 'undead') ? seek : (dist < 80 ? arrive : seek);
             const [sx, sy] = steeringFn(entity, other);
             ax += sx;
@@ -209,11 +219,11 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
     if (entity._poisonTimer <= 0) entity.poisoned = false;
   }
 
-  // Priority 3: Sweep scan
-  if (entity.state === 'wander' || entity.state === 'full') {
-    const edible = EATS[entity.category];
-    const fears = FLEES[entity.category];
-    const sweep = sweepScan(entity, grid, species, edible, fears);
+  // Priority 3: Sweep scan (THROTTLED — runs every 4 ticks per entity, staggered by id)
+  if (entity._sweepSkip === undefined) entity._sweepSkip = (entity.id.length || 0) % 4;
+  entity._sweepSkip = (entity._sweepSkip + 1) % 4;
+  if (entity._sweepSkip === 0 && (entity.state === 'wander' || entity.state === 'full')) {
+    const sweep = sweepScan(entity, grid, species, EATS[entity.category], fears);
     if (sweep.steering) {
       ax += sweep.steering[0];
       ay += sweep.steering[1];
@@ -230,10 +240,10 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
     }
     const [wx, wy] = wander(entity, species);
 
-    // Flocking for species that flock
+    // Flocking for species that flock (reuse nearbyAll from unified query)
     let flockForce = [0, 0];
     if (species.flocking) {
-      flockForce = flocking(entity, grid, species);
+      flockForce = flockingFromNearby(entity, nearbyAll);
     }
 
     if (entity.state === 'sweeping' && entity._sweepInterest > 0.3) {
@@ -345,9 +355,9 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
     infectNearby(entity, grid);
   }
 
-  // Reproduction
+  // Reproduction (reuse nearbyAll from unified query)
   if (Math.random() < CONFIG.REPRODUCTION_CHANCE) {
-    tryReproduce(entity, grid, entities);
+    tryReproduceFromNearby(entity, nearbyAll, entities);
   }
 }
 
@@ -358,9 +368,10 @@ function updatePlant(entity, grid, entities) {
   entity.spawnTimer = (entity.spawnTimer || 0) + 1;
   if (entity.spawnTimer >= species.spawnEveryTicks) {
     entity.spawnTimer = 0;
-    const nearby = grid.query(entity.x, entity.y, CONFIG.PLANT_SPAWN_RADIUS);
+    const nearby = grid.queryRaw(entity.x, entity.y, CONFIG.PLANT_SPAWN_RADIUS);
     let fruitCount = 0;
-    for (const { entity: e } of nearby) {
+    for (let j = 0; j < nearby.length; j++) {
+      const e = nearby[j].entity;
       if (e.category === 'food') fruitCount++;
     }
     if (fruitCount < CONFIG.PLANT_MAX_FRUIT_NEARBY) {
@@ -389,8 +400,9 @@ function updateFire(entity, grid, entities) {
   }
 
   const species = SPECIES[entity.type];
-  const nearby = grid.query(entity.x, entity.y, CONFIG.FIRE_SPREAD_RADIUS);
-  for (const { entity: other } of nearby) {
+  const nearby = grid.queryRaw(entity.x, entity.y, CONFIG.FIRE_SPREAD_RADIUS);
+  for (let j = 0; j < nearby.length; j++) {
+    const other = nearby[j].entity;
     if (other === entity || other.dead) continue;
     if (other.category === 'plant') {
       other.dead = true;
@@ -410,8 +422,9 @@ function updateFire(entity, grid, entities) {
 
 /** Water: extinguish fire */
 function updateWater(entity, grid, entities) {
-  const nearby = grid.query(entity.x, entity.y, CONFIG.WATER_RADIUS);
-  for (const { entity: other } of nearby) {
+  const nearby = grid.queryRaw(entity.x, entity.y, CONFIG.WATER_RADIUS);
+  for (let j = 0; j < nearby.length; j++) {
+    const other = nearby[j].entity;
     if (other === entity || other.dead) continue;
     if (other.category === 'fire') {
       other.dead = true;
@@ -432,8 +445,9 @@ function updateLightning(entity, grid, entities) {
     entity._lastStrike = { x: strikeX, y: strikeY };
     entity._strikeFlash = 10;
 
-    const victims = grid.query(strikeX, strikeY, CONFIG.LIGHTNING_RADIUS);
-    for (const { entity: other } of victims) {
+    const victims = grid.queryRaw(strikeX, strikeY, CONFIG.LIGHTNING_RADIUS);
+    for (let j = 0; j < victims.length; j++) {
+      const other = victims[j].entity;
       if (other === entity || other.dead) continue;
       if (other.hp !== undefined) {
         other.hp -= 2;
@@ -444,8 +458,9 @@ function updateLightning(entity, grid, entities) {
       other.stunnedTimer = 60;
     }
     // Stun in wider radius
-    const stunVictims = grid.query(strikeX, strikeY, CONFIG.LIGHTNING_STUN_RADIUS);
-    for (const { entity: other } of stunVictims) {
+    const stunVictims = grid.queryRaw(strikeX, strikeY, CONFIG.LIGHTNING_STUN_RADIUS);
+    for (let j = 0; j < stunVictims.length; j++) {
+      const other = stunVictims[j].entity;
       if (other.stunnedTimer < 30) {
         other.stunned = true;
         other.stunnedTimer = 30;
@@ -457,8 +472,9 @@ function updateLightning(entity, grid, entities) {
 
 /** Ice: freezes nearby entities */
 function updateIce(entity, grid, entities) {
-  const nearby = grid.query(entity.x, entity.y, CONFIG.ICE_FREEZE_RADIUS);
-  for (const { entity: other } of nearby) {
+  const nearby = grid.queryRaw(entity.x, entity.y, CONFIG.ICE_FREEZE_RADIUS);
+  for (let j = 0; j < nearby.length; j++) {
+    const other = nearby[j].entity;
     if (other === entity || other.dead) continue;
     if (other.category === 'fire') {
       other.dead = true;
@@ -475,7 +491,8 @@ function updateIce(entity, grid, entities) {
 /** Tornado: sucks entities in and flings them */
 function updateTornado(entity, grid, entities) {
   const nearby = grid.query(entity.x, entity.y, CONFIG.ICE_FREEZE_RADIUS * 1.7);
-  for (const { entity: other, dist } of nearby) {
+  for (let j = 0; j < nearby.length; j++) {
+    const { entity: other, dist } = nearby[j];
     if (other === entity || other.dead) continue;
     if (other.static) continue;
     // Pull toward center
@@ -505,8 +522,9 @@ function updateBomb(entity, grid, entities) {
   }
   // Explode
   if (entity.lifespan <= 0) {
-    const nearby = grid.query(entity.x, entity.y, CONFIG.ICE_FREEZE_RADIUS * 1.4);
-    for (const { entity: other } of nearby) {
+    const nearby = grid.queryRaw(entity.x, entity.y, CONFIG.ICE_FREEZE_RADIUS * 1.4);
+    for (let j = 0; j < nearby.length; j++) {
+      const other = nearby[j].entity;
       if (other === entity) continue;
       if (other.hp !== undefined) {
         other.hp -= 5;
@@ -523,6 +541,9 @@ function updateBomb(entity, grid, entities) {
     entity._explodedAt = { x: entity.x, y: entity.y };
   }
 }
+
+// ── Cached category sets for render ──
+const ANIMAL_CATEGORIES = new Set(['herbivore', 'predator', 'undead', 'mythical', 'bug', 'bird', 'sea']);
 
 // ── Special Ability Functions ────────────
 
@@ -544,8 +565,9 @@ function breatheFire(dragon, grid, entities) {
 }
 
 function unicornHeal(unicorn, grid) {
-  const nearby = grid.query(unicorn.x, unicorn.y, CONFIG.UNICORN_HEAL_RADIUS);
-  for (const { entity: other } of nearby) {
+  const nearby = grid.queryRaw(unicorn.x, unicorn.y, CONFIG.UNICORN_HEAL_RADIUS);
+  for (let j = 0; j < nearby.length; j++) {
+    const other = nearby[j].entity;
     if (other === unicorn || other.dead) continue;
     // Heal hunger
     if (other.hunger !== undefined && other.hunger > 10) {
@@ -575,8 +597,9 @@ function leaveWeb(spider, grid, entities) {
   entities.push(web);
 
   // Trap nearby entities
-  const nearby = grid.query(spider.x, spider.y, CONFIG.SPIDER_WEB_RADIUS);
-  for (const { entity: other } of nearby) {
+  const nearby = grid.queryRaw(spider.x, spider.y, CONFIG.SPIDER_WEB_RADIUS);
+  for (let j = 0; j < nearby.length; j++) {
+    const other = nearby[j].entity;
     if (other === spider || other.dead) continue;
     if (other.category === 'bug') continue;
     if (other.static) continue;
@@ -607,8 +630,9 @@ function releaseInk(entity, grid, entities) {
   }
 
   // Blind nearby predators
-  const nearby = grid.query(entity.x, entity.y, CONFIG.OCTOPUS_INK_RADIUS);
-  for (const { entity: other } of nearby) {
+  const nearby = grid.queryRaw(entity.x, entity.y, CONFIG.OCTOPUS_INK_RADIUS);
+  for (let j = 0; j < nearby.length; j++) {
+    const other = nearby[j].entity;
     if (other === entity || other.dead) continue;
     if (other.category === 'predator' || other.category === 'undead' || other.category === 'mythical') {
       other.blinded = true;
@@ -618,8 +642,9 @@ function releaseInk(entity, grid, entities) {
 }
 
 function infectNearby(zombie, grid) {
-  const nearby = grid.query(zombie.x, zombie.y, CONFIG.ZOMBIE_INFECT_RADIUS);
-  for (const { entity: other } of nearby) {
+  const nearby = grid.queryRaw(zombie.x, zombie.y, CONFIG.ZOMBIE_INFECT_RADIUS);
+  for (let j = 0; j < nearby.length; j++) {
+    const other = nearby[j].entity;
     if (other === zombie || other.dead) continue;
     if (other.category === 'undead') continue;
     if (other.static) continue;
@@ -644,15 +669,15 @@ function convertToZombie(entity, entities, grid) {
   }
 }
 
-function tryReproduce(entity, grid, entities) {
+function tryReproduceFromNearby(entity, nearbyAll, entities) {
   if (entity.reproductionCooldown > 0) return;
   if (entities.length >= CONFIG.MAX_ENTITIES) return;
 
-  const nearby = grid.query(entity.x, entity.y, CONFIG.REPRODUCTION_RADIUS);
-  for (const { entity: other } of nearby) {
+  const radSq = CONFIG.REPRODUCTION_RADIUS * CONFIG.REPRODUCTION_RADIUS;
+  for (let i = 0; i < nearbyAll.length; i++) {
+    const other = nearbyAll[i].entity;
     if (other === entity || other.dead) continue;
-    if (other.type === entity.type && other.reproductionCooldown <= 0) {
-      // Make a baby!
+    if (other.type === entity.type && other.reproductionCooldown <= 0 && nearbyAll[i].distSq < radSq) {
       const mx = (entity.x + other.x) / 2;
       const my = (entity.y + other.y) / 2;
       const baby = createEntity(entity.type, mx + (Math.random() - 0.5) * 20, my + (Math.random() - 0.5) * 20);

@@ -10,6 +10,7 @@ import { getUIState, initUI, updateEntityCounter } from './ui.js';
 // ── State ────────────────────────────────
 let entities = [];
 let tick = 0;
+let liveCount = 0;
 let grid = new SpatialGrid();
 let canvas, ctx;
 let lastAutosave = 0;
@@ -26,6 +27,7 @@ function boot() {
   initUI({
     onClear: () => {
       entities.length = 0;
+      liveCount = 0;
       clearParticles();
       tick = 0;
     },
@@ -37,6 +39,7 @@ function boot() {
     entities = saved.entities.map(deserializeEntity);
     tick = saved.tick || 0;
   }
+  liveCount = entities.length;
 
   // Input handling
   setupInput();
@@ -78,7 +81,7 @@ function loop(now) {
     autosave(tick, entities);
   }
 
-  updateEntityCounter(entities.filter(e => !e.dead).length);
+  updateEntityCounter(liveCount);
   render(ctx, canvas, entities, false);
 }
 
@@ -86,12 +89,14 @@ function loop(now) {
 function updateWorld() {
   // Rebuild spatial grid
   grid.clear();
-  for (const e of entities) {
+  for (let i = 0; i < entities.length; i++) {
+    const e = entities[i];
     if (!e.dead) grid.insert(e);
   }
 
   // Update each entity
-  for (const e of entities) {
+  for (let i = 0; i < entities.length; i++) {
+    const e = entities[i];
     if (e.dead) continue;
     updateEntity(e, grid, canvas._cssWidth || canvas.width, canvas._cssHeight || canvas.height, entities, FIXED_DT);
 
@@ -103,7 +108,7 @@ function updateWorld() {
 
     // Explosion particles
     if (e._explodedAt) {
-      for (let i = 0; i < 15; i++) {
+      for (let j = 0; j < 15; j++) {
         addParticle(e._explodedAt.x, e._explodedAt.y, '💥');
       }
       e._explodedAt = null;
@@ -111,14 +116,20 @@ function updateWorld() {
     }
   }
 
-  // Remove dead entities
-  for (let i = entities.length - 1; i >= 0; i--) {
-    if (entities[i].dead) entities.splice(i, 1);
+  // Remove dead entities — filter in-place, track live count
+  let writeIdx = 0;
+  for (let i = 0; i < entities.length; i++) {
+    if (!entities[i].dead) {
+      entities[writeIdx++] = entities[i];
+    }
   }
+  entities.length = writeIdx;
+  liveCount = writeIdx;
 
   // Enforce max entities
   if (entities.length > CONFIG.MAX_ENTITIES) {
     entities.splice(0, entities.length - CONFIG.MAX_ENTITIES);
+    liveCount = entities.length;
   }
 }
 
@@ -198,9 +209,9 @@ function handlePlace(x, y) {
 
   if (ui.selectedTool === 'eraser') {
     // Remove entities near point
-    const targets = grid.query(x, y, 40);
-    for (const { entity } of targets) {
-      entity.dead = true;
+    const targets = grid.queryRaw(x, y, 40);
+    for (let i = 0; i < targets.length; i++) {
+      targets[i].entity.dead = true;
     }
     return;
   }

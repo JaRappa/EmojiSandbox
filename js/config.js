@@ -29,7 +29,7 @@ const CONFIG = {
   SEEK_STRENGTH: 2.5,
 
   // Sweep scan — slow rotating long-range view cone
-  SWEEP_RANGE: 800,            // max range of the sweep cone (pixels, effectively whole canvas)
+  SWEEP_RANGE: 300,            // max range of the sweep cone (pixels) — capped by species.senseRadius*3 in sweepScan
   SWEEP_ARC: Math.PI / 72,     // cone half-angle (~2.5°, 5° total width)
   SWEEP_SPEED: 0.003,           // radians per tick — full 360° sweep takes ~35 seconds at 60fps
   SWEEP_TARGET_LINGER: 0.8,    // fraction: how much of a sweep cycle to continue chasing after target lost
@@ -92,6 +92,7 @@ const CONFIG = {
   // UI
   PLACE_THROTTLE_MS: 100,     // min ms between place events during drag
   MIN_TRAY_BUTTON_SIZE: 56,
+  EMOJI_FONT: '26px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif',
 };
 
 export default CONFIG;
