@@ -19,7 +19,7 @@ let animationId;
 // ── Boot ─────────────────────────────────
 function boot() {
   canvas = document.getElementById('canvas');
-  ctx = canvas.getContext('2d');
+  ctx = canvas.getContext('2d', { desynchronized: true }) || canvas.getContext('2d');
 
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
@@ -135,7 +135,7 @@ function updateWorld() {
 
 // ── Canvas Resize ────────────────────────
 function resizeCanvas() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const dpr = 1; // Cap at 1x for performance (emoji sprites already look fine)
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
 

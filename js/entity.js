@@ -177,37 +177,43 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
   if (entity.state !== 'flee' && shouldSeek) {
     const edible = EATS[entity.category];
     if (edible) {
-      // Sort by distSq (no sqrt needed)
-      nearbyAll.sort((a, b) => a.distSq - b.distSq);
+      // Linear scan for nearest edible (avoid full sort)
+      let bestIdx = -1;
+      let bestDistSq = Infinity;
       for (let i = 0; i < nearbyAll.length; i++) {
         const other = nearbyAll[i].entity;
         if (other === entity || other.dead) continue;
-        if (edible.includes(other.category)) {
-          const distSq = nearbyAll[i].distSq;
-          if (distSq < eatDistSq) {
-            // Eat it!
-            other.dead = true;
-            entity.hunger = CONFIG.HUNGER_EAT_ZERO;
-            entity._fullCooldown = CONFIG.HUNGER_FULL_COOLDOWN;
-            entity.state = 'eat';
-            entity.targetId = null;
-            entity._ateAt = { x: other.x, y: other.y };
+        if (edible.includes(other.category) && nearbyAll[i].distSq < bestDistSq) {
+          bestDistSq = nearbyAll[i].distSq;
+          bestIdx = i;
+        }
+      }
 
-            // Check if food had poison
-            if (other.poisoned || (SPECIES[other.type] && SPECIES[other.type].poison)) {
-              entity.poisoned = true;
-              entity._poisonTimer = 200; // poison lasts 200 ticks
-            }
-          } else {
-            const dist = Math.sqrt(distSq);
-            const steeringFn = (entity.category === 'predator' || entity.category === 'undead') ? seek : (dist < 80 ? arrive : seek);
-            const [sx, sy] = steeringFn(entity, other);
-            ax += sx;
-            ay += sy;
-            entity.state = 'seek';
-            entity.targetId = other.id;
+      if (bestIdx !== -1) {
+        const other = nearbyAll[bestIdx].entity;
+        const distSq = bestDistSq;
+        if (distSq < eatDistSq) {
+          // Eat it!
+          other.dead = true;
+          entity.hunger = CONFIG.HUNGER_EAT_ZERO;
+          entity._fullCooldown = CONFIG.HUNGER_FULL_COOLDOWN;
+          entity.state = 'eat';
+          entity.targetId = null;
+          entity._ateAt = { x: other.x, y: other.y };
+
+          // Check if food had poison
+          if (other.poisoned || (SPECIES[other.type] && SPECIES[other.type].poison)) {
+            entity.poisoned = true;
+            entity._poisonTimer = 200; // poison lasts 200 ticks
           }
-          break;
+        } else {
+          const dist = Math.sqrt(distSq);
+          const steeringFn = (entity.category === 'predator' || entity.category === 'undead') ? seek : (dist < 80 ? arrive : seek);
+          const [sx, sy] = steeringFn(entity, other);
+          ax += sx;
+          ay += sy;
+          entity.state = 'seek';
+          entity.targetId = other.id;
         }
       }
     }
@@ -220,7 +226,7 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
   }
 
   // Priority 3: Sweep scan (THROTTLED — runs every 4 ticks per entity, staggered by id)
-  if (entity._sweepSkip === undefined) entity._sweepSkip = (entity.id.length || 0) % 4;
+  if (entity._sweepSkip === undefined) entity._sweepSkip = Math.floor(Math.random() * 4);
   entity._sweepSkip = (entity._sweepSkip + 1) % 4;
   if (entity._sweepSkip === 0 && (entity.state === 'wander' || entity.state === 'full')) {
     const sweep = sweepScan(entity, grid, species, EATS[entity.category], fears);

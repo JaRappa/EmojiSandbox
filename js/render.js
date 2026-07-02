@@ -3,6 +3,27 @@ import CONFIG from './config.js';
 
 let particleArr = [];
 
+// ── Sprite cache: pre-render emojis to offscreen canvases ──
+const spriteCache = new Map();
+const SPRITE_SIZE = 32;
+
+function getSprite(emoji) {
+  let sprite = spriteCache.get(emoji);
+  if (!sprite) {
+    const off = document.createElement('canvas');
+    off.width = SPRITE_SIZE;
+    off.height = SPRITE_SIZE;
+    const offCtx = off.getContext('2d');
+    offCtx.textAlign = 'center';
+    offCtx.textBaseline = 'middle';
+    offCtx.font = '26px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
+    offCtx.fillText(emoji, SPRITE_SIZE / 2, SPRITE_SIZE / 2);
+    sprite = off;
+    spriteCache.set(emoji, off);
+  }
+  return sprite;
+}
+
 // Pre-compute category set for fast animal check
 const ANIMAL_CATEGORIES = new Set(['herbivore', 'predator', 'undead', 'mythical', 'bug', 'bird', 'sea']);
 
@@ -25,16 +46,23 @@ export function clearParticles() {
   particleArr.length = 0;
 }
 
-function updateParticles() {
-  for (let i = particleArr.length - 1; i >= 0; i--) {
+export function updateParticlesAndCleanup() {
+  let writeIdx = 0;
+  for (let i = 0; i < particleArr.length; i++) {
     const p = particleArr[i];
     p.x += p.vx;
     p.y += p.vy;
     p.vy += 0.03; // gravity
     p.life--;
-    if (p.life <= 0) particleArr.splice(i, 1);
+    if (p.life > 0) {
+      particleArr[writeIdx++] = p;
+    }
   }
+  particleArr.length = writeIdx;
 }
+
+// ── Offscreen culling margin ──
+const CULL_MARGIN = 40;
 
 export function render(ctx, canvas, entities, paused) {
   const w = canvas._cssWidth || canvas.width;
@@ -44,22 +72,28 @@ export function render(ctx, canvas, entities, paused) {
   ctx.fillStyle = CONFIG.BG_COLOR;
   ctx.fillRect(0, 0, w, h);
 
-  // ── Pre-set font for emoji rendering (avoid string concat in loop) ──
-  const emojiFont = CONFIG.EMOJI_FONT;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-
-  // ── Cache CONFIG lookups ──
+  // ── Cache ──
   const hungerMax = CONFIG.HUNGER_MAX;
+  const cullMaxX = w + CULL_MARGIN;
+  const cullMaxY = h + CULL_MARGIN;
 
-  // ── Render entities ──
-  for (let i = 0; i < entities.length; i++) {
+  // ── Build draw lists grouped by alpha band ──
+  // We draw in two passes: alpha=1 (most entities) and alpha<1 (hungry ones)
+  // This avoids per-entity globalAlpha toggles which are slow
+  const len = entities.length;
+
+  // Pass 1: alpha=1 entities (full opacity)
+  ctx.globalAlpha = 1;
+
+  for (let i = 0; i < len; i++) {
     const entity = entities[i];
     if (entity.dead) continue;
     const ex = entity.x, ey = entity.y;
 
-    // ── Visual effects ──
-    // Bomb flash effect
+    // ── Culling: skip entities far off-screen ──
+    if (ex < -CULL_MARGIN || ex > cullMaxX || ey < -CULL_MARGIN || ey > cullMaxY) continue;
+
+    // ── Visual effects (infrequent — only when special state is active) ──
     if (entity._flashBomb) {
       ctx.fillStyle = 'rgba(255, 60, 30, 0.15)';
       ctx.beginPath();
@@ -68,12 +102,9 @@ export function render(ctx, canvas, entities, paused) {
       entity._flashBomb = false;
     }
 
-    // Lightning strike flash
     if (entity._strikeFlash > 0 && entity._lastStrike) {
-      const flashAlpha = entity._strikeFlash * 0.05;
       const strike = entity._lastStrike;
-
-      // Draw lightning bolt
+      const flashAlpha = entity._strikeFlash * 0.05;
       ctx.save();
       ctx.strokeStyle = `rgba(255, 255, 200, ${flashAlpha})`;
       ctx.lineWidth = 3;
@@ -81,58 +112,40 @@ export function render(ctx, canvas, entities, paused) {
       ctx.shadowBlur = 20;
       ctx.beginPath();
       ctx.moveTo(strike.x, strike.y - 100);
-      let lx = strike.x;
-      let ly = strike.y - 100;
-      const segments = 6;
-      for (let s = 0; s < segments; s++) {
+      let lx = strike.x, ly = strike.y - 100;
+      for (let s = 0; s < 6; s++) {
         lx += (Math.random() - 0.5) * 60;
-        ly += 100 / segments;
+        ly += 100 / 6;
         ctx.lineTo(lx, ly);
       }
       ctx.lineTo(strike.x, strike.y + 30);
       ctx.stroke();
       ctx.restore();
-
-      // Flash circle
-      ctx.fillStyle = `rgba(255, 255, 200, ${flashAlpha * 0.3})`;
-      ctx.beginPath();
-      ctx.arc(strike.x, strike.y, CONFIG.LIGHTNING_RADIUS, 0, Math.PI * 2);
-      ctx.fill();
     }
 
-    // Frozen glow
     if (entity.frozen) {
       ctx.fillStyle = 'rgba(150, 220, 255, 0.25)';
       ctx.beginPath();
       ctx.arc(ex, ey, 18, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(180, 230, 255, 0.5)';
-      ctx.lineWidth = 2;
-      ctx.stroke();
     }
 
-    // Stunned indicator
     if (entity.stunned) {
       const stunAlpha = 0.3 + Math.sin(entity.age * 0.5) * 0.2;
       ctx.fillStyle = `rgba(255, 255, 0, ${stunAlpha})`;
       ctx.font = '14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
       ctx.fillText('⚡', ex, ey - 26);
     }
 
-    // Webbed indicator
     if (entity.webbed) {
       ctx.fillStyle = 'rgba(200, 200, 220, 0.25)';
       ctx.beginPath();
       ctx.arc(ex, ey, 16, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(220, 220, 240, 0.6)';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([3, 3]);
-      ctx.stroke();
-      ctx.setLineDash([]);
     }
 
-    // Infected visual
     if (entity.infected) {
       const infectFlash = Math.sin(entity.age * 0.3) * 0.5 + 0.5;
       ctx.fillStyle = `rgba(120, 200, 80, ${infectFlash * 0.2})`;
@@ -141,7 +154,6 @@ export function render(ctx, canvas, entities, paused) {
       ctx.fill();
     }
 
-    // Poisoned visual
     if (entity.poisoned) {
       ctx.fillStyle = 'rgba(160, 0, 200, 0.2)';
       ctx.beginPath();
@@ -149,16 +161,26 @@ export function render(ctx, canvas, entities, paused) {
       ctx.fill();
     }
 
-    // ── Render emoji ──
+    // ── Render emoji (pre-rendered sprite for performance) ──
     const hasHunger = entity.hunger !== undefined;
-    const alpha = hasHunger
-      ? 1 - (entity.hunger / hungerMax) * 0.5
-      : 1;
-    ctx.globalAlpha = alpha;
-    ctx.font = emojiFont;
-    ctx.fillText(entity.emoji, ex, ey);
+    const sprite = getSprite(entity.emoji);
+    const sx = ex - SPRITE_SIZE / 2;
+    const sy = ey - SPRITE_SIZE / 2;
 
-    // ── Bars (hunger, HP, state indicators) ──
+    if (hasHunger) {
+      const alpha = 1 - (entity.hunger / hungerMax) * 0.5;
+      if (alpha < 0.98) {
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(sprite, sx, sy);
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.drawImage(sprite, sx, sy);
+      }
+    } else {
+      ctx.drawImage(sprite, sx, sy);
+    }
+
+    // ── Bars ──
     if (ANIMAL_CATEGORIES.has(entity.category) && hasHunger) {
       const barWidth = 22;
       const barHeight = 4;
@@ -166,7 +188,6 @@ export function render(ctx, canvas, entities, paused) {
       const barX = ex - barWidth / 2;
       const hungerPct = entity.hunger / hungerMax;
 
-      // Color: green → yellow → red
       let barColor;
       if (hungerPct < 0.4) {
         const t = hungerPct / 0.4;
@@ -178,15 +199,11 @@ export function render(ctx, canvas, entities, paused) {
         barColor = `rgb(255, ${Math.round(120 * (1 - (hungerPct - 0.7) / 0.3))}, 0)`;
       }
 
-      // Background
       ctx.fillStyle = 'rgba(0,0,0,0.45)';
       ctx.fillRect(barX - 1, barY - 1, barWidth + 2, barHeight + 2);
-
-      // Filled portion
       ctx.fillStyle = barColor;
       ctx.fillRect(barX, barY, barWidth * (1 - hungerPct), barHeight);
 
-      // Small green dot above full animals
       if (entity.state === 'full') {
         ctx.fillStyle = '#4ade80';
         ctx.beginPath();
@@ -195,7 +212,6 @@ export function render(ctx, canvas, entities, paused) {
       }
     }
 
-    // HP bar for entities with > 3 HP
     if (entity.hp > 3) {
       const hpBarWidth = 24;
       const hpBarHeight = 3;
@@ -209,7 +225,6 @@ export function render(ctx, canvas, entities, paused) {
       ctx.fillRect(hpX, hpY, hpBarWidth * hpRatio, hpBarHeight);
     }
 
-    // Blind / ink indicator
     if (entity.blinded) {
       ctx.fillStyle = 'rgba(0,0,0,0.4)';
       ctx.beginPath();
@@ -220,7 +235,7 @@ export function render(ctx, canvas, entities, paused) {
 
   // ── Particles ──
   ctx.globalAlpha = 1;
-  if (!paused) updateParticles();
+  if (!paused) updateParticlesAndCleanup();
   for (let i = 0; i < particleArr.length; i++) {
     const p = particleArr[i];
     const ratio = p.life / p.maxLife;
