@@ -242,15 +242,18 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
   }
 
   // Priority 3: Sweep scan (THROTTLED — runs every 4 ticks per entity, staggered by id)
-  if (entity._sweepSkip === undefined) entity._sweepSkip = Math.floor(Math.random() * 4);
-  entity._sweepSkip = (entity._sweepSkip + 1) % 4;
-  if (entity._sweepSkip === 0 && (entity.state === 'wander' || entity.state === 'full')) {
-    const sweep = sweepScan(entity, grid, species, EATS[entity.category], fears);
-    if (sweep.steering) {
-      ax += sweep.steering[0];
-      ay += sweep.steering[1];
-      if (sweep.interest > 0.4) {
-        entity.state = 'sweeping';
+  // At high entity counts, skip sweep scan entirely
+  if (entities.length < CONFIG.PERF_TIER_CRITICAL) {
+    if (entity._sweepSkip === undefined) entity._sweepSkip = Math.floor(Math.random() * 4);
+    entity._sweepSkip = (entity._sweepSkip + 1) % 4;
+    if (entity._sweepSkip === 0 && (entity.state === 'wander' || entity.state === 'full')) {
+      const sweep = sweepScan(entity, grid, species, EATS[entity.category], fears);
+      if (sweep.steering) {
+        ax += sweep.steering[0];
+        ay += sweep.steering[1];
+        if (sweep.interest > 0.4) {
+          entity.state = 'sweeping';
+        }
       }
     }
   }
@@ -342,10 +345,12 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
   if (entity.y < 0) { entity.y = 0; entity.vy = Math.max(0, entity.vy); }
   if (entity.y > canvasHeight) { entity.y = canvasHeight; entity.vy = Math.min(0, entity.vy); }
 
-  // ── Special per-species mechanics ──────
+  // ── Special per-species mechanics ──
+  // At critical tier, throttle special abilities to every other tick
+  const skipSpecials = entities.length >= CONFIG.PERF_TIER_CRITICAL && (entity.age & 1);
 
   // Dragon breathes fire
-  if (species.breathesFire) {
+  if (species.breathesFire && !skipSpecials) {
     entity._dragonFireTimer--;
     if (entity._dragonFireTimer <= 0) {
       entity._dragonFireTimer = CONFIG.DRAGON_FIRE_INTERVAL + Math.random() * 200;
@@ -354,17 +359,17 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
   }
 
   // Unicorn heals nearby allies
-  if (species.heals) {
+  if (species.heals && !skipSpecials) {
     unicornHeal(entity, grid);
   }
 
   // Spider leaves webs
-  if (species.webs && entity.age % 100 === 0) {
+  if (species.webs && !skipSpecials && entity.age % 100 === 0) {
     leaveWeb(entity, grid, entities);
   }
 
   // Octopus/Kraken ink
-  if (species.inks) {
+  if (species.inks && !skipSpecials) {
     entity._inkTimer--;
     if (entity._inkTimer <= 0 && entity.state === 'flee') {
       entity._inkTimer = 300;
@@ -373,12 +378,15 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
   }
 
   // Zombie infection
-  if (species.infectsTo && entity.state === 'seek') {
+  if (species.infectsTo && entity.state === 'seek' && !skipSpecials) {
     infectNearby(entity, grid);
   }
 
-  // Reproduction (reuse nearbyAll from unified query)
-  if (Math.random() < CONFIG.REPRODUCTION_CHANCE) {
+  // Reproduction — reduce frequency at high entity counts
+  const reproChance = entities.length >= CONFIG.PERF_TIER_CRITICAL
+    ? CONFIG.REPRODUCTION_CHANCE * 0.25
+    : CONFIG.REPRODUCTION_CHANCE;
+  if (Math.random() < reproChance) {
     tryReproduceFromNearby(entity, nearbyAll, entities);
   }
 }
@@ -646,11 +654,12 @@ function updateTornado(entity, grid, entities, canvasWidth, canvasHeight) {
   entity._wanderAngle = ((entity._wanderAngle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
 
   // ── Suction ──
-  const nearby = grid.query(entity.x, entity.y, CONFIG.ICE_FREEZE_RADIUS * 1.7);
+  const nearby = grid.queryRaw(entity.x, entity.y, CONFIG.ICE_FREEZE_RADIUS * 1.7);
   for (let j = 0; j < nearby.length; j++) {
-    const { entity: other, dist } = nearby[j];
+    const { entity: other, distSq } = nearby[j];
     if (other === entity || other.dead) continue;
     if (other.static) continue;
+    const dist = Math.sqrt(distSq);
     // Pull toward center
     const dx = entity.x - other.x;
     const dy = entity.y - other.y;

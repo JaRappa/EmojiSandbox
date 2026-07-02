@@ -165,6 +165,9 @@ html, body {
   height: calc(100% - 160px);  /* 44px top-bar + 36px category + 80px tray */
   cursor: crosshair;
   display: block;
+  image-rendering: auto;
+  contain: strict;
+  will-change: contents;
 }
 
 /* ── Category Bar ─────────────────────── */

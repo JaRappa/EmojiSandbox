@@ -10,7 +10,7 @@ const CONFIG = {
   // Simulation
   TICKS_PER_SECOND: 60,
   MAX_SPEED_MULTIPLIER: 1.0,   // applied to species base speed
-  MAX_ENTITIES: 800,
+  MAX_ENTITIES: 2000,
   EAT_DISTANCE: 28,
   EDGE_BOUNCE_MARGIN: 15,
   EDGE_BOUNCE_STRENGTH: 0.5,    // soft wall-steering strength — gentle push away from edges
@@ -106,6 +106,10 @@ const CONFIG = {
   PLACE_THROTTLE_MS: 100,     // min ms between place events during drag
   MIN_TRAY_BUTTON_SIZE: 56,
   EMOJI_FONT: '26px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif',
+
+  // Performance tiers — when entity count exceeds threshold, reduce visual quality
+  PERF_TIER_HIGH: 300,     // >300 entities: skip particle text rendering
+  PERF_TIER_CRITICAL: 600, // >600 entities: skip bars, effects, particles entirely; batch draw
 };
 
 export default CONFIG;

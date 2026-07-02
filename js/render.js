@@ -29,6 +29,8 @@ function getSprite(emoji) {
 const ANIMAL_CATEGORIES = new Set(['herbivore', 'predator', 'undead', 'mythical', 'bug', 'bird', 'sea']);
 
 export function addParticle(x, y, emoji) {
+  // Hard cap particles to prevent explosion spam from killing perf at high entity counts
+  if (particleArr.length > 500) return;
   particleArr.push({
     x, y,
     emoji,
@@ -65,25 +67,71 @@ export function updateParticlesAndCleanup() {
 // ── Offscreen culling margin ──
 const CULL_MARGIN = 40;
 
+// Pre-allocated reused path objects for bar drawing (avoids GC)
+const _barPathCache = {};
+
+/** Determine render quality tier based on entity count */
+function getPerfTier(len) {
+  if (len > CONFIG.PERF_TIER_CRITICAL) return 'critical';
+  if (len > CONFIG.PERF_TIER_HIGH) return 'high';
+  return 'normal';
+}
+
 export function render(ctx, canvas, entities, paused) {
   const w = canvas._cssWidth || canvas.width;
   const h = canvas._cssHeight || canvas.height;
+  const len = entities.length;
 
   // Background
   ctx.fillStyle = getCanvasBgColor();
   ctx.fillRect(0, 0, w, h);
 
-  // ── Cache ──
+  const tier = getPerfTier(len);
+
+  // ── CRITICAL TIER (600+ entities): absolute minimal rendering ──
+  if (tier === 'critical') {
+    ctx.globalAlpha = 1;
+    const cullMaxX = w + CULL_MARGIN;
+    const cullMaxY = h + CULL_MARGIN;
+
+    for (let i = 0; i < len; i++) {
+      const entity = entities[i];
+      if (entity.dead) continue;
+      const ex = entity.x, ey = entity.y;
+      if (ex < -CULL_MARGIN || ex > cullMaxX || ey < -CULL_MARGIN || ey > cullMaxY) continue;
+
+      const sprite = getSprite(entity.emoji);
+      ctx.drawImage(sprite, ex - SPRITE_SIZE / 2, ey - SPRITE_SIZE / 2);
+
+      // Only hunger bar for animals, no other effects
+      if (ANIMAL_CATEGORIES.has(entity.category) && entity.hunger !== undefined) {
+        const barY = ey + 20;
+        const barX = ex - 11;
+        const hungerPct = entity.hunger / CONFIG.HUNGER_MAX;
+        // Simplified single-color bar
+        const r = Math.min(255, Math.round(510 * (1 - hungerPct)));
+        const g = Math.min(255, Math.round(255 * hungerPct));
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        ctx.fillRect(barX - 1, barY - 1, 24, 6);
+        ctx.fillStyle = `rgb(${r},${g},0)`;
+        ctx.fillRect(barX, barY, 22 * (1 - hungerPct), 4);
+      }
+    }
+
+    // Skip particles entirely at critical tier
+    particleArr.length = 0;
+    ctx.globalAlpha = 1;
+    return;
+  }
+
+  // ── HIGH TIER (300-600 entities): skip detailed visual effects ──
+  // ── NORMAL TIER (<300 entities): full rendering with all effects ──
+
   const hungerMax = CONFIG.HUNGER_MAX;
   const cullMaxX = w + CULL_MARGIN;
   const cullMaxY = h + CULL_MARGIN;
+  const isNormal = tier === 'normal';
 
-  // ── Build draw lists grouped by alpha band ──
-  // We draw in two passes: alpha=1 (most entities) and alpha<1 (hungry ones)
-  // This avoids per-entity globalAlpha toggles which are slow
-  const len = entities.length;
-
-  // Pass 1: alpha=1 entities (full opacity)
   ctx.globalAlpha = 1;
 
   for (let i = 0; i < len; i++) {
@@ -91,39 +139,41 @@ export function render(ctx, canvas, entities, paused) {
     if (entity.dead) continue;
     const ex = entity.x, ey = entity.y;
 
-    // ── Culling: skip entities far off-screen ──
     if (ex < -CULL_MARGIN || ex > cullMaxX || ey < -CULL_MARGIN || ey > cullMaxY) continue;
 
-    // ── Visual effects (infrequent — only when special state is active) ──
-    if (entity._flashBomb) {
-      ctx.fillStyle = 'rgba(255, 60, 30, 0.15)';
-      ctx.beginPath();
-      ctx.arc(ex, ey, 30, 0, Math.PI * 2);
-      ctx.fill();
-      entity._flashBomb = false;
-    }
-
-    if (entity._strikeFlash > 0 && entity._lastStrike) {
-      const strike = entity._lastStrike;
-      const flashAlpha = entity._strikeFlash * 0.05;
-      ctx.save();
-      ctx.strokeStyle = `rgba(255, 255, 200, ${flashAlpha})`;
-      ctx.lineWidth = 3;
-      ctx.shadowColor = `rgba(255, 255, 100, ${flashAlpha})`;
-      ctx.shadowBlur = 20;
-      ctx.beginPath();
-      ctx.moveTo(strike.x, strike.y - 100);
-      let lx = strike.x, ly = strike.y - 100;
-      for (let s = 0; s < 6; s++) {
-        lx += (Math.random() - 0.5) * 60;
-        ly += 100 / 6;
-        ctx.lineTo(lx, ly);
+    // ── Visual effects — only in normal tier ──
+    if (isNormal) {
+      if (entity._flashBomb) {
+        ctx.fillStyle = 'rgba(255, 60, 30, 0.15)';
+        ctx.beginPath();
+        ctx.arc(ex, ey, 30, 0, Math.PI * 2);
+        ctx.fill();
+        entity._flashBomb = false;
       }
-      ctx.lineTo(strike.x, strike.y + 30);
-      ctx.stroke();
-      ctx.restore();
+
+      if (entity._strikeFlash > 0 && entity._lastStrike) {
+        const strike = entity._lastStrike;
+        const flashAlpha = entity._strikeFlash * 0.05;
+        ctx.save();
+        ctx.strokeStyle = `rgba(255, 255, 200, ${flashAlpha})`;
+        ctx.lineWidth = 3;
+        ctx.shadowColor = `rgba(255, 255, 100, ${flashAlpha})`;
+        ctx.shadowBlur = 20;
+        ctx.beginPath();
+        ctx.moveTo(strike.x, strike.y - 100);
+        let lx = strike.x, ly = strike.y - 100;
+        for (let s = 0; s < 6; s++) {
+          lx += (Math.random() - 0.5) * 60;
+          ly += 100 / 6;
+          ctx.lineTo(lx, ly);
+        }
+        ctx.lineTo(strike.x, strike.y + 30);
+        ctx.stroke();
+        ctx.restore();
+      }
     }
 
+    // Status effects (cheap — only when active, which is rare)
     if (entity.frozen) {
       ctx.fillStyle = 'rgba(150, 220, 255, 0.25)';
       ctx.beginPath();
@@ -181,7 +231,7 @@ export function render(ctx, canvas, entities, paused) {
       ctx.drawImage(sprite, sx, sy);
     }
 
-    // ── Bars ──
+    // ── Bars (only in normal tier; high tier skips HP bars) ──
     if (ANIMAL_CATEGORIES.has(entity.category) && hasHunger) {
       const barWidth = 22;
       const barHeight = 4;
@@ -213,7 +263,8 @@ export function render(ctx, canvas, entities, paused) {
       }
     }
 
-    if (entity.hp > 3) {
+    // HP bar — only in normal tier
+    if (isNormal && entity.hp > 3) {
       const hpBarWidth = 24;
       const hpBarHeight = 3;
       const hpY = ey + 26;
@@ -234,15 +285,20 @@ export function render(ctx, canvas, entities, paused) {
     }
   }
 
-  // ── Particles ──
+  // ── Particles (skip at high tier) ──
   ctx.globalAlpha = 1;
   if (!paused) updateParticlesAndCleanup();
-  for (let i = 0; i < particleArr.length; i++) {
-    const p = particleArr[i];
-    const ratio = p.life / p.maxLife;
-    ctx.globalAlpha = ratio;
-    ctx.font = `${16 + ratio * 8}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
-    ctx.fillText(p.emoji, p.x, p.y);
+  if (isNormal) {
+    for (let i = 0; i < particleArr.length; i++) {
+      const p = particleArr[i];
+      const ratio = p.life / p.maxLife;
+      ctx.globalAlpha = ratio;
+      ctx.font = `${16 + ratio * 8}px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif`;
+      ctx.fillText(p.emoji, p.x, p.y);
+    }
+  } else {
+    // High tier: clear particles, don't render them
+    particleArr.length = 0;
   }
   ctx.globalAlpha = 1;
 }

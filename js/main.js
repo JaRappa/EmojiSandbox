@@ -79,12 +79,20 @@ function loop(now) {
 
   accumulator += dt * ui.speed;
 
+  // At high entity counts, cap max ticks per frame to prevent death spiral
+  const maxUpdates = entities.length > 600 ? 3 : entities.length > 300 ? 5 : 10;
+
   let updates = 0;
-  while (accumulator >= FIXED_DT && updates < 10) {
+  while (accumulator >= FIXED_DT && updates < maxUpdates) {
     accumulator -= FIXED_DT;
     tick++;
     updateWorld();
     updates++;
+  }
+
+  // If falling behind, skip accumulator to catch up
+  if (accumulator > FIXED_DT * maxUpdates) {
+    accumulator = FIXED_DT * maxUpdates;
   }
 
   // Autosave
@@ -112,16 +120,20 @@ function updateWorld() {
     if (e.dead) continue;
     updateEntity(e, grid, canvas._cssWidth || canvas.width, canvas._cssHeight || canvas.height, entities, FIXED_DT);
 
-    // Spawn particle on eat
+    // Spawn particle on eat — throttle at high entity counts
     if (e._ateAt) {
-      addParticle(e._ateAt.x, e._ateAt.y, '💨');
+      if (entities.length < CONFIG.PERF_TIER_HIGH) {
+        addParticle(e._ateAt.x, e._ateAt.y, '💨');
+      }
       e._ateAt = null;
     }
 
-    // Explosion particles
+    // Explosion particles — reduce count at high entity counts
     if (e._explodedAt) {
-      for (let j = 0; j < 15; j++) {
-        addParticle(e._explodedAt.x, e._explodedAt.y, '💥');
+      if (entities.length < CONFIG.PERF_TIER_HIGH) {
+        for (let j = 0; j < 15; j++) {
+          addParticle(e._explodedAt.x, e._explodedAt.y, '💥');
+        }
       }
       e._explodedAt = null;
       e.dead = true;

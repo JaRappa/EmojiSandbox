@@ -5,10 +5,13 @@ class SpatialGrid {
   constructor(cellSize = CONFIG.GRID_CELL_SIZE) {
     this.cellSize = cellSize;
     this.cells = new Map();
+    this._resultPool = [];
+    this._poolIdx = 0;
   }
 
+  // Integer hash: faster than string template interpolation
   _key(cx, cy) {
-    return `${cx},${cy}`;
+    return (cx & 0xFFFF) | ((cy & 0xFFFF) << 16);
   }
 
   _cellCoords(x, y) {
@@ -17,18 +20,22 @@ class SpatialGrid {
 
   clear() {
     this.cells.clear();
+    this._poolIdx = 0;
   }
 
   insert(entity) {
     const [cx, cy] = this._cellCoords(entity.x, entity.y);
     const key = this._key(cx, cy);
-    if (!this.cells.has(key)) this.cells.set(key, []);
-    this.cells.get(key).push(entity);
+    let cell = this.cells.get(key);
+    if (!cell) { cell = []; this.cells.set(key, cell); }
+    cell.push(entity);
   }
 
-  /** Return all entities within `radius` of (x, y) with distSq only (no sqrt). */
+  /** Return all entities within `radius` of (x, y) with distSq only (no sqrt).
+   *  Uses a pre-allocated pool to avoid GC churn at high entity counts. */
   queryRaw(x, y, radius) {
-    const result = [];
+    const pool = this._resultPool;
+    let idx = this._poolIdx;
     const [centerCx, centerCy] = this._cellCoords(x, y);
     const cellsOut = Math.ceil(radius / this.cellSize);
     const rSq = radius * radius;
@@ -43,15 +50,20 @@ class SpatialGrid {
           if (e.dead) continue;
           const ex = e.x - x;
           const ey = e.y - y;
-          // Fast square-check first, then circle
           if (ex > radius || ex < -radius || ey > radius || ey < -radius) continue;
           const distSq = ex * ex + ey * ey;
           if (distSq <= rSq && distSq > 0.001) {
-            result.push({ entity: e, distSq });
+            if (idx >= pool.length) pool.push({ entity: null, distSq: 0 });
+            pool[idx].entity = e;
+            pool[idx].distSq = distSq;
+            idx++;
           }
         }
       }
     }
+    // Slice out our portion — but keep pool for reuse
+    const result = pool.slice(this._poolIdx, idx);
+    this._poolIdx = idx;
     return result;
   }
 
@@ -73,7 +85,8 @@ class SpatialGrid {
       for (let cy = minCy; cy <= maxCy; cy++) {
         const cell = this.cells.get(this._key(cx, cy));
         if (!cell) continue;
-        for (const e of cell) {
+        for (let k = 0; k < cell.length; k++) {
+          const e = cell[k];
           if (!e.dead && e.x >= x - w / 2 && e.x <= x + w / 2 && e.y >= y - h / 2 && e.y <= y + h / 2) {
             result.push(e);
           }
