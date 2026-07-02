@@ -148,14 +148,19 @@ export function updateEntity(entity, grid, canvasWidth, canvasHeight, entities, 
   entity.state = 'wander';
 
   // ── UNIFIED SHORT-RANGE QUERY ──
-  // Do ONE queryRaw for flee + seek + flock + reproduction (all within sense radius)
+  // Do ONE queryRaw for seek + flock + reproduction (all within sense radius)
   const nearbyAll = grid.queryRaw(entity.x, entity.y, dynamicSenseRadius);
 
-  // Priority 1: Flee
+  // Priority 1: Flee — only at shorter range so prey doesn't panic across the map
+  // Flee radius is a fraction of sense radius: threats must be fairly close.
+  const fleeRadius = dynamicSenseRadius * CONFIG.FLEE_RADIUS_FRACTION;
+  const nearbyFlee = (fleeRadius < dynamicSenseRadius)
+    ? grid.queryRaw(entity.x, entity.y, fleeRadius)
+    : nearbyAll;
   const fears = FLEES[entity.category];
   if (fears) {
-    for (let i = 0; i < nearbyAll.length; i++) {
-      const other = nearbyAll[i].entity;
+    for (let i = 0; i < nearbyFlee.length; i++) {
+      const other = nearbyFlee[i].entity;
       if (other === entity || other.dead) continue;
       if (fears.includes(other.category)) {
         const [fx, fy] = flee(entity, other);

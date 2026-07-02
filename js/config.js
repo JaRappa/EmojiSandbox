@@ -26,6 +26,7 @@ const CONFIG = {
   WANDER_STRENGTH: 0.3,
   WANDER_DIRECTION_CHANGE: 0.05, // radians per tick
   FLEE_STRENGTH: 4.0,
+  FLEE_RADIUS_FRACTION: 0.4,    // flee detection range as fraction of sense radius (0.4 = 40%)
   SEEK_STRENGTH: 2.5,
 
   // Sweep scan — slow rotating long-range view cone
