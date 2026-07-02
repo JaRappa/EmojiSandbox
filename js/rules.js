@@ -47,7 +47,7 @@ const SPECIES = {
   // ── Mythical ───────────────────────────
   dragon:    { emoji: '🐉', category: 'mythical',   speed: 2.2, senseRadius: 300, hungerRate: 0.04, breathesFire: true, hp: 10 },
   unicorn:   { emoji: '🦄', category: 'mythical',   speed: 2.0, senseRadius: 200, hungerRate: 0.04, heals: true },
-  kraken:    { emoji: '🐙', category: 'mythical',   speed: 1.5, senseRadius: 250, hungerRate: 0.05, inks: true },
+  kraken:    { emoji: '🦑', category: 'mythical',   speed: 1.5, senseRadius: 250, hungerRate: 0.05, inks: true },
 
   // ── Bugs ───────────────────────────────
   spider:    { emoji: '🕷️', category: 'bug',        speed: 1.4, senseRadius: 140, hungerRate: 0.05, webs: true, poison: true },
